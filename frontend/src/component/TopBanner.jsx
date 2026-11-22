@@ -1,0 +1,2 @@
+import React from 'react'; import { ArrowRight } from 'lucide-react';
+export default function TopBanner({onClick}) { return <button className="top-banner" onClick={onClick}><span className="banner-line"/><span>Check the footprint map</span><span className="banner-arrow"><ArrowRight size={26}/></span></button>; }
