@@ -1,1 +1,20 @@
+import { Routes, Route } from 'react-router-dom';
+import Home from './pages/Home';
+import Friends from './pages/Friends';
+import Earn from './pages/Earn';
+import Wallet from './pages/Wallet';
+import BottomNav from './components/BottomNav';
 
+export default function App() {
+  return (
+    <div className="app">
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/friends" element={<Friends />} />
+        <Route path="/earn" element={<Earn />} />
+        <Route path="/wallet" element={<Wallet />} />
+      </Routes>
+      <BottomNav />
+    </div>
+  );
+}
