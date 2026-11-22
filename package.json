@@ -1,1 +1,11 @@
 
+{
+  "name": "paws-monorepo",
+  "private": true,
+  "workspaces": ["frontend", "admin", "backend/functions", "contracts"],
+  "scripts": {
+    "dev:app": "npm --workspace frontend run dev",
+    "dev:admin": "npm --workspace admin run dev",
+    "build:all": "npm --workspace frontend run build && npm --workspace admin run build"
+  }
+}
