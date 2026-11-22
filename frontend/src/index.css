@@ -1,1 +1,15 @@
-
+:root {
+  --bg: #0f0f0f; --surface: #1a1a1a; --card: #2a2a2a;
+  --accent: #0088ff; --text: #ffffff; --muted: #999999;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: Inter, -apple-system, "SF Pro Display", sans-serif;
+  overflow-x: hidden;
+}
+.app { max-width: 480px; margin: 0 auto; padding-bottom: 80px; min-height: 100vh; }
+button { font-family: inherit; cursor: pointer; border: none; }
+.card { background: var(--card); border-radius: 16px; padding: 16px; }
+.btn-primary { background: var(--accent); color: #fff; border-radius: 12px; padding: 12px 20px; font-weight: 600; }
