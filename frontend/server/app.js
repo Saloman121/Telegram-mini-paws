@@ -36,9 +36,7 @@ async function auth(req, res, next) {
   try {
     const initData = (req.headers.authorization || '').replace(/^tma /, '');
     const tg = verifyInitData(initData);
-    if (!tg) return res.status(401).json({
-      error: `Invalid Telegram auth (token:${!!(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN)}, initData:${initData.length})`,
-    });
+    if (!tg) return res.status(401).json({ error: 'Invalid Telegram auth' });
     const ref = db.collection('users').doc(String(tg.id));
     let snap = await ref.get();
     if (!snap.exists) {
@@ -60,9 +58,34 @@ async function auth(req, res, next) {
 const r = express.Router();
 r.use(auth);
 
+// ---- Helpers ----
+function session(u) {
+  const now = Date.now();
+  if (now - (u.sessionStart || 0) > SESSION_MS) return { taps: 0, start: now };
+  return { taps: u.sessionTaps || 0, start: u.sessionStart };
+}
+
+const RANKS = ['Rookie', 'Cub', 'Hunter', 'Ranger', 'Alpha', 'Legend'];
+const rankTitle = (lvl) => RANKS[Math.min(RANKS.length - 1, Math.floor((lvl - 1) / 10))];
+
+// Shape the profile exactly the way the frontend (Home.jsx) expects it
+function shapeProfile(u) {
+  const s = session(u);
+  const max = u.level * 500;
+  return {
+    id: u.id, username: u.username, first_name: u.first_name,
+    blocked: false,
+    points: u.balance, balance: u.balance,
+    level: u.level, rank_title: rankTitle(u.level),
+    wallet: u.wallet || null, referral_code: u.id,
+    mining: { energy: Math.max(0, max - s.taps), max_energy: max, per_tap: 1 },
+    config: { max_level: 50, links: { community: '', rewards: '' } },
+  };
+}
+
 // ---- Auth / user ----
-r.post('/auth/telegram', wrap((req, res) => res.json({ ok: true, user: req.user })));
-r.get('/user/profile', wrap((req, res) => res.json(req.user)));
+r.post('/auth/telegram', wrap((req, res) => res.json({ ok: true, user: shapeProfile(req.user) })));
+r.get('/user/profile', wrap((req, res) => res.json(shapeProfile(req.user))));
 r.get('/user/balance', wrap((req, res) => res.json({ balance: req.user.balance })));
 r.get('/user/level', wrap((req, res) =>
   res.json({ level: req.user.level, maxTaps: req.user.level * 500, holdRequired: req.user.level * 1000 })));
@@ -70,11 +93,6 @@ r.post('/user/level/upgrade', wrap((req, res) =>
   res.status(501).json({ error: 'Level upgrade needs TON payment (coming soon)' })));
 
 // ---- Mining ----
-function session(u) {
-  const now = Date.now();
-  if (now - (u.sessionStart || 0) > SESSION_MS) return { taps: 0, start: now };
-  return { taps: u.sessionTaps || 0, start: u.sessionStart };
-}
 r.post('/mining/tap', wrap(async (req, res) => {
   const u = req.user;
   const max = u.level * 500;
@@ -85,7 +103,11 @@ r.post('/mining/tap', wrap(async (req, res) => {
     balance: FieldValue.increment(allowed),
     sessionTaps: s.taps + allowed, sessionStart: s.start,
   });
-  res.json({ added: allowed, balance: u.balance + allowed, sessionTaps: s.taps + allowed, maxTaps: max });
+  res.json({
+    added: allowed,
+    points: u.balance + allowed,
+    energy: Math.max(0, max - (s.taps + allowed)),
+  });
 }));
 r.get('/mining/status', wrap((req, res) => {
   const s = session(req.user);
