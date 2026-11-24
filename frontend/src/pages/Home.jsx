@@ -12,15 +12,17 @@ import { api } from '../services/api';
 
 export default function Home({ goLeaderboard }) {
   const { profile, refresh, toast } = useApp();
-  const m = profile.mining;
-  const [bal, setBal] = useState(profile.points);
-  const [energy, setEnergy] = useState(m.energy);
+  // Safe defaults: the page never crashes even if the server omits a field
+  const m = profile.mining || { energy: 0, max_energy: 500, per_tap: 1 };
+  const cfg = profile.config || { max_level: 50, links: {} };
+  const [bal, setBal] = useState(profile.points ?? 0);
+  const [energy, setEnergy] = useState(m.energy ?? 0);
   const [modal, setModal] = useState(null);
   const pending = useRef(0);
   const sending = useRef(false);
 
   // Server is the source of truth: re-sync whenever the profile reloads.
-  useEffect(() => { setBal(profile.points); setEnergy(m.energy); }, [profile.points, m.energy]);
+  useEffect(() => { setBal(profile.points ?? 0); setEnergy(m.energy ?? 0); }, [profile.points, m.energy]);
 
   const flush = async () => {
     if (sending.current || pending.current === 0) return;
@@ -43,14 +45,14 @@ export default function Home({ goLeaderboard }) {
     try { WebApp.HapticFeedback.impactOccurred('light'); } catch { /* no haptics */ }
   };
 
-  const links = profile.config.links || {};
+  const links = cfg.links || {};
   const open = (url) => url && (url.startsWith('https://t.me') ? WebApp.openTelegramLink(url) : WebApp.openLink(url));
 
   return (
     <div className="stack gap-lg">
       <Header onBuy={() => setModal('buy')} onMap={goLeaderboard} />
       <TapButton disabled={energy <= 0} perTap={m.per_tap} onTap={onTap} />
-      <BalanceCard balance={bal} rankTitle={profile.rank_title} level={profile.level} maxLevel={profile.config.max_level}
+      <BalanceCard balance={bal} rankTitle={profile.rank_title} level={profile.level} maxLevel={cfg.max_level}
         energy={Math.max(0, energy)} maxEnergy={m.max_energy} perTap={m.per_tap} onUpgrade={() => setModal('level')} />
       <AutoTapCard />
       <div className="grid2">
