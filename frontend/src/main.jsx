@@ -6,11 +6,23 @@ import App from './App.jsx';
 import './style.css';
 
 WebApp.ready();
-WebApp.expand();
-try { WebApp.setHeaderColor('#000000'); WebApp.setBackgroundColor('#000000'); } catch { /* older clients */ }
+
+try {
+  WebApp.expand();
+  WebApp.setHeaderColor('#000000');
+  WebApp.setBackgroundColor('#000000');
+} catch (error) {
+  console.log('Telegram SDK:', error);
+}
+
+const manifestUrl =
+  import.meta.env.VITE_TONCONNECT_MANIFEST_URL ||
+  `${window.location.origin}/tonconnect-manifest.json`;
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <TonConnectUIProvider manifestUrl={import.meta.env.VITE_TONCONNECT_MANIFEST_URL}>
-    <App />
-  </TonConnectUIProvider>
+  <React.StrictMode>
+    <TonConnectUIProvider manifestUrl={manifestUrl}>
+      <App />
+    </TonConnectUIProvider>
+  </React.StrictMode>
 );
