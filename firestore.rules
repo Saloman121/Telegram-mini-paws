@@ -1,0 +1,8 @@
+rules_version = '2';
+// Phase 1: deny ALL direct client access. Every read/write goes through
+// Cloud Functions (Admin SDK bypasses these rules). Tightened per phase later.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} { allow read, write: if false; }
+  }
+}
