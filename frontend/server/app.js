@@ -25,7 +25,8 @@ function verifyInitData(initData) {
   const check = [...p.entries()].sort(([a], [b]) => a.localeCompare(b))
     .map(([k, v]) => `${k}=${v}`).join('\n');
   const TOKEN = (process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '').trim();
-const secret = crypto.createHmac('sha256', 'WebAppData').update(TOKEN).digest();
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(TOKEN).digest();
+  const calc = crypto.createHmac('sha256', secret).update(check).digest('hex');
   if (calc !== hash) return null;
   if (Date.now() / 1000 - Number(p.get('auth_date')) > 86400) return null;
   try { return JSON.parse(p.get('user')); } catch { return null; }
@@ -36,8 +37,8 @@ async function auth(req, res, next) {
     const initData = (req.headers.authorization || '').replace(/^tma /, '');
     const tg = verifyInitData(initData);
     if (!tg) return res.status(401).json({
-  error: `Invalid Telegram auth (token:${!!(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN)}, initData:${initData.length})`,
-});
+      error: `Invalid Telegram auth (token:${!!(process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN)}, initData:${initData.length})`,
+    });
     const ref = db.collection('users').doc(String(tg.id));
     let snap = await ref.get();
     if (!snap.exists) {
