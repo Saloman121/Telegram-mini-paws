@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import adminRouter from './admin.js';
 
 // ---- Firebase init ----
 const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
@@ -11,6 +12,9 @@ const db = getFirestore();
 
 const app = express();
 app.use(express.json());
+
+// Admin panel API (protected by Firebase login + ADMIN_EMAILS). Must come before the Telegram-auth router.
+app.use('/api/admin', adminRouter(db));
 
 // ---- Config (placeholders: change to your real values) ----
 const SESSION_MS = 2 * 60 * 60 * 1000; // 2 hour tap session
@@ -94,7 +98,7 @@ function shapeProfile(u) {
   const max = u.level * 500;
   return {
     id: u.id, username: u.username, first_name: u.first_name,
-    blocked: false,
+    blocked: !!u.blocked,
     points: u.balance, balance: u.balance, withdrawable: u.balance,
     level: u.level, rank_title: rankTitle(u.level),
     wallet: u.wallet || null,
@@ -126,6 +130,7 @@ r.post('/user/level/upgrade', wrap((req, res) =>
 // ---- Mining ----
 r.post('/mining/tap', wrap(async (req, res) => {
   const u = req.user;
+  if (u.blocked) return res.status(403).json({ error: 'Account blocked' });
   const max = u.level * 500;
   const s = session(u);
   const want = Math.max(0, Math.min(Number(req.body.count) || 0, 100));
