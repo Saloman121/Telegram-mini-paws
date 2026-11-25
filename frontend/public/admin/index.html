@@ -1,66 +1,86 @@
 <!doctype html>
-<html lang="en"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>PAWS Admin</title>
+<title>$PAWS Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;600&family=Spline+Sans+Mono:wght@500&family=Wix+Madefor+Display:wght@700;800&display=swap" rel="stylesheet">
 <style>
-:root{--card:#151515;--blue:#4DA3F5;--mut:#8a8a8a;--bad:#ff6b6b}
-*{box-sizing:border-box}
-body{margin:0 auto;background:#000;color:#fff;font:15px system-ui,sans-serif;padding:12px;max-width:720px}
-.card{background:var(--card);border-radius:12px;padding:12px;margin:10px 0}
-input,select,textarea,button{font:inherit;border-radius:8px;border:1px solid #333;background:#0b0b0b;color:#fff;padding:9px;width:100%;margin:4px 0}
-button{background:var(--blue);color:#000;border:0;font-weight:600;cursor:pointer}
-button.ghost{background:#222;color:#fff}
-button.bad{background:var(--bad)}
-.tabs{display:flex;gap:6px;overflow-x:auto}
-.tabs button{width:auto;white-space:nowrap}
-.row{display:flex;justify-content:space-between;align-items:center}
-.row button{width:auto}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.mut{color:var(--mut);font-size:13px}
-.err{color:var(--bad)}
-</style></head>
+:root{--bg:#000;--card:#151515;--hi:#1c1b1b;--blue:#4da3f5;--onblue:#001d36;--bluec:#003258;--onbluec:#d1e4ff;--muted:#adabaa;--line:#262626;--ok:#22c55e;--warn:#f59e0b;--bad:#ff5449;--text:#fff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px 'Instrument Sans',system-ui,sans-serif}
+button,input,select{font:inherit;color:inherit}button{cursor:pointer}
+[hidden]{display:none!important}
+.wrap{display:flex;min-height:100vh}
+aside{width:210px;flex:none;border-right:1px solid var(--line);padding:16px 10px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px}
+aside .brand{font:800 18px 'Wix Madefor Display',sans-serif;padding:4px 10px 12px}
+aside button{background:none;border:0;text-align:left;padding:10px 12px;border-radius:12px;color:var(--muted);font-weight:600;display:flex;gap:8px;align-items:center}
+aside button.on{background:var(--bluec);color:var(--onbluec)}
+aside .me{margin-top:auto;padding:10px;font-size:11px;color:var(--muted);word-break:break-all}
+main{flex:1;min-width:0;padding:16px 20px calc(32px + env(safe-area-inset-bottom,0px));max-width:1100px}
+h1{font:800 24px 'Wix Madefor Display',sans-serif;margin:0 0 14px;letter-spacing:-.4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+.k{color:var(--muted);font-size:12px}.v{font:800 24px 'Wix Madefor Display',sans-serif;font-variant-numeric:tabular-nums;margin-top:4px}
+.btn{border:0;border-radius:9999px;background:var(--blue);color:var(--onblue);font-weight:600;padding:9px 16px;font-size:13px}
+.btn.sm{padding:6px 11px;font-size:12px}.btn.gh{background:var(--hi);color:#fff;border:1px solid var(--line)}.btn.bad{background:rgba(255,84,73,.18);color:var(--bad)}.btn.ok{background:rgba(34,197,94,.18);color:var(--ok)}
+.btn:disabled{opacity:.4}
+.pill{display:inline-block;padding:3px 10px;border-radius:9999px;font-size:11px;font-weight:600;background:var(--hi);border:1px solid var(--line)}
+.pill.ok{background:rgba(34,197,94,.15);color:var(--ok);border-color:transparent}.pill.w{background:rgba(245,158,11,.15);color:var(--warn);border-color:transparent}.pill.b{background:rgba(255,84,73,.15);color:var(--bad);border-color:transparent}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:16px;background:var(--card)}
+table{width:100%;border-collapse:collapse;min-width:560px}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-size:12px;font-weight:600}tr:last-child td{border-bottom:0}
+.mono{font-family:'Spline Sans Mono',monospace;font-size:12px}.m{color:var(--muted)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.inp{background:var(--hi);border:1px solid var(--line);border-radius:12px;padding:9px 12px;min-width:0}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.form label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}
+.bars{display:flex;align-items:flex-end;gap:6px;height:90px;margin-top:10px}.bars i{flex:1;background:var(--blue);border-radius:6px 6px 0 0;min-height:4px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#fff;color:#000;padding:10px 16px;border-radius:9999px;font-weight:600;z-index:9;max-width:90%}
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+#login .card{width:100%;max-width:360px;display:flex;flex-direction:column;gap:10px}
+.err{color:var(--bad);min-height:18px}
+@media (max-width:760px){
+ .wrap{flex-direction:column}
+ aside{width:100%;height:auto;position:sticky;top:0;flex-direction:row;overflow-x:auto;padding:8px;border-right:0;border-bottom:1px solid var(--line);background:var(--bg);z-index:5;padding-top:calc(8px + env(safe-area-inset-top,0px))}
+ aside .brand,aside .me{display:none}aside button{white-space:nowrap;padding:8px 12px}
+ main{padding:12px 12px 32px}
+}
+</style>
+</head>
 <body>
-<div id="login" class="card" hidden>
-  <h2>PAWS Admin</h2>
-  <input id="em" type="email" placeholder="Email" autocomplete="username">
-  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
-  <button id="go">Login</button>
-  <p id="lerr" class="err"></p>
+<div id="login" hidden>
+  <div class="card">
+    <h1>$PAWS Admin</h1>
+    <input class="inp" id="em" type="email" placeholder="Email" autocomplete="username">
+    <input class="inp" id="pw" type="password" placeholder="Password" autocomplete="current-password">
+    <button class="btn" id="go">Login</button>
+    <div class="err" id="lerr"></div>
+  </div>
 </div>
-<div id="app" hidden>
-  <div class="row"><h2>PAWS Admin</h2><button id="out" class="ghost">Logout</button></div>
-  <div id="tabs" class="tabs"></div>
-  <div id="view"></div>
-</div>
-<div id="toast" class="mut"></div>
+<div class="wrap" id="app" hidden><aside id="nav"></aside><main><div id="v"></div></main></div>
+<div id="t"></div>
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 
 const auth = getAuth(initializeApp({
-  apiKey: 'AIzaSyAKTHY_A2Zm59XPEI6uD5hnMBKWg76tD7M',
+  apiKey: 'PASTE_YOUR_WEB_API_KEY',
   authDomain: 'telegram-mini-app-meme.firebaseapp.com',
   projectId: 'telegram-mini-app-meme',
 }));
-const $ = (id) => document.getElementById(id);
-const view = $('view');
 
-// Safe element builder (uses textContent, never innerHTML)
-function h(tag, props = {}, ...kids) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (k === 'class') el.className = v;
-    else el[k] = v;
-  }
-  for (const kid of kids.flat()) el.append(kid instanceof Node ? kid : document.createTextNode(String(kid ?? '')));
-  return el;
+const $ = (id) => document.getElementById(id);
+const f = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function toast(m) {
+  $('t').innerHTML = '<div class="toast">' + esc(m) + '</div>';
+  clearTimeout(toast.h);
+  toast.h = setTimeout(() => ($('t').innerHTML = ''), 2600);
 }
-const toast = (m) => { $('toast').textContent = m; setTimeout(() => ($('toast').textContent = ''), 4000); };
-const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } };
 
 async function api(path, method = 'GET', body) {
   const token = await auth.currentUser.getIdToken();
@@ -74,128 +94,147 @@ async function api(path, method = 'GET', body) {
   return data;
 }
 
-async function dashboard() {
-  const s = await api('/stats');
-  const box = (n, l) => h('div', { class: 'card' }, h('b', {}, Number(n).toLocaleString()), h('div', { class: 'mut' }, l));
-  view.append(h('div', { class: 'grid' }, box(s.users, 'Users'), box(s.total_points, 'Total points'), box(s.tasks, 'Tasks')));
+const N = [['dash', '📊', 'Dashboard'], ['users', '👤', 'Users'], ['tasks', '✅', 'Tasks'], ['mining', '⛏️', 'Mining'], ['ref', '🔗', 'Referrals'], ['wal', '👛', 'Wallets'], ['wd', '💸', 'Withdrawals'], ['set', '⚙️', 'Settings'], ['log', '📜', 'Audit log']];
+const EP = { dash: '/stats', users: '/users', tasks: '/tasks', mining: null, ref: '/referrals', wal: '/wallets', wd: '/withdrawals', set: null, log: '/audit' };
+const S = { tab: 'dash', q: '', d: null, set: {} };
+
+const pill = (s) => '<span class="pill ' + (['completed', 'verified', 'active'].includes(s) ? 'ok' : ['rejected', 'blocked'].includes(s) ? 'b' : 'w') + '">' + esc(s) + '</span>';
+
+function dash() {
+  const d = S.d;
+  const c = [['Total users', f(d.users)], ['Active (24h)', f(d.active24h)], ['PAWS distributed', f(d.distributed)], ['Verified wallets', f(d.verified)], ['Verification fees (est.)', f(d.verification_ton * 100) / 100 + ' TON'], ['Auto Tap activations', f(d.autotap)], ['Total referrals', f(d.referrals)], ['Pending withdrawals', f(d.wd_pending)], ['Completed withdrawals', f(d.wd_completed)]];
+  const max = Math.max(1, ...d.chart);
+  const bars = d.chart.map((n) => '<i title="' + n + '" style="height:' + Math.max(4, (n / max) * 100) + '%"></i>').join('');
+  return '<h1>Dashboard</h1><div class="grid">' + c.map((x) => '<div class="card"><div class="k">' + x[0] + '</div><div class="v">' + esc(x[1]) + '</div></div>').join('') + '</div><div class="card"><div class="k">New users, last 7 days: ' + d.chart.join(' · ') + '</div><div class="bars">' + bars + '</div></div>';
 }
 
-function userCard(u) {
-  const bal = h('input', { type: 'number', value: u.balance });
-  const lvl = h('input', { type: 'number', value: u.level });
-  const blk = h('select', {}, h('option', { value: 'no' }, 'Active'), h('option', { value: 'yes' }, 'Blocked'));
-  blk.value = u.blocked ? 'yes' : 'no';
-  return h('div', { class: 'card' },
-    h('b', {}, u.name), ' ', h('span', { class: 'mut' }, '#' + u.id + (u.username ? ' @' + u.username : '')),
-    h('div', { class: 'mut' }, 'Wallet: ' + (u.wallet ? (u.walletVerified ? 'verified' : 'unverified') : 'none') + ' | Referrals: ' + u.referralCount),
-    h('div', { class: 'grid' },
-      h('div', {}, h('div', { class: 'mut' }, 'Points'), bal),
-      h('div', {}, h('div', { class: 'mut' }, 'Level (1-50)'), lvl)),
-    blk,
-    h('button', { onclick: guard(async () => {
-      await api('/users/' + u.id, 'POST', { balance: Number(bal.value), level: Number(lvl.value), blocked: blk.value === 'yes' });
-      toast('Saved');
-    }) }, 'Save'));
+function users() {
+  return '<h1>Users</h1><div class="row"><input class="inp" id="q" placeholder="Search Telegram ID or username (empty = top 30)" value="' + esc(S.q) + '" style="flex:1"></div><div class="tw"><table><tr><th>Telegram ID</th><th>Username</th><th>PAWS</th><th>Level</th><th>Wallet</th><th>Status</th><th>Actions</th></tr>' +
+    (S.d.items.length ? S.d.items.map((u) => '<tr><td class="mono">' + esc(u.id) + '</td><td>' + esc(u.username || u.name) + '</td><td class="mono">' + f(u.balance) + '</td><td><select class="inp" data-lv="' + esc(u.id) + '">' + Array.from({ length: 50 }, (_, i) => '<option' + (i + 1 === u.level ? ' selected' : '') + '>' + (i + 1) + '</option>').join('') + '</select></td><td class="mono">' + esc(u.wallet ? u.wallet.slice(0, 6) + '…' + u.wallet.slice(-4) : '—') + ' ' + (u.verified ? '<span class="pill ok">verified</span>' : '') + '</td><td>' + pill(u.blocked ? 'blocked' : 'active') + '</td><td><button class="btn sm gh" data-a="pts:' + esc(u.id) + '">Points</button> <button class="btn sm ' + (u.blocked ? 'ok' : 'bad') + '" data-a="blk:' + esc(u.id) + ':' + (u.blocked ? 0 : 1) + '">' + (u.blocked ? 'Unblock' : 'Block') + '</button></td></tr>').join('') : '<tr><td class="m" colspan="7">No users found</td></tr>') + '</table></div>';
 }
 
-async function users() {
-  const q = h('input', { placeholder: 'Telegram ID or @username (empty = top 30)' });
-  const list = h('div');
-  const run = async () => {
-    const r = await api('/users?q=' + encodeURIComponent(q.value.trim()));
-    list.replaceChildren(...r.items.map(userCard));
-    if (!r.items.length) list.append(h('p', { class: 'mut' }, 'No users found.'));
-  };
-  view.append(q, h('button', { onclick: guard(run) }, 'Search'), list);
-  await run();
+function tasks() {
+  const d = S.d;
+  return '<h1>Tasks</h1><div class="card" style="margin-bottom:14px"><b>Add task</b><div class="form" style="margin-top:10px"><label>Title<input class="inp" id="nt" placeholder="e.g. Join partner chat"></label><label>Reward (PAWS)<input class="inp" id="nr" inputmode="numeric" value="1000"></label><label>Link<input class="inp" id="nu" placeholder="https://t.me/..."></label><label>Category<select class="inp" id="nc"><option value="in_game">In-game</option><option value="partners">Partners</option><option value="invite">Invite Quest</option></select></label><label>Verification<select class="inp" id="nv"><option value="auto">Automatic</option><option value="manual">Manual review</option></select></label></div><div style="margin-top:12px"><button class="btn" data-a="addt">Add task</button></div></div>' +
+    '<div class="tw" style="margin-bottom:14px"><table><tr><th>Task</th><th>Reward</th><th>Category</th><th>Verify</th><th>Status</th><th></th></tr>' +
+    (d.items.length ? d.items.map((t) => '<tr><td>' + esc(t.icon || '🐾') + ' ' + esc(t.title) + '</td><td class="mono">' + f(t.reward) + '</td><td>' + esc(t.category) + '</td><td>' + esc(t.verify) + '</td><td>' + (t.enabled ? pill('active') : '<span class="pill">disabled</span>') + '</td><td><button class="btn sm gh" data-a="tog:' + esc(t.id) + ':' + (t.enabled ? 0 : 1) + '">' + (t.enabled ? 'Disable' : 'Enable') + '</button> <button class="btn sm bad" data-a="del:' + esc(t.id) + '">Delete</button></td></tr>').join('') : '<tr><td class="m" colspan="6">No tasks yet</td></tr>') +
+    '</table></div><b>Manual submissions</b><div class="tw" style="margin-top:8px"><table><tr><th>User</th><th>Task</th><th>Status</th><th></th></tr>' +
+    (d.subs.length ? d.subs.map((s) => '<tr><td>' + esc(s.username) + '</td><td>' + esc(s.title) + '</td><td>' + pill(s.status) + '</td><td><button class="btn sm ok" data-a="sa:' + esc(s.id) + '">Approve</button> <button class="btn sm bad" data-a="sr:' + esc(s.id) + '">Reject</button></td></tr>').join('') : '<tr><td class="m">No submissions</td></tr>') + '</table></div>';
 }
 
-async function tasks() {
-  const f = {
-    id: h('input', { type: 'hidden' }),
-    title: h('input', { placeholder: 'Title' }),
-    description: h('input', { placeholder: 'Description' }),
-    reward: h('input', { type: 'number', placeholder: 'Reward (PAWS)' }),
-    url: h('input', { placeholder: 'Link (https://...)' }),
-    category: h('select', {}, ...['in_game', 'partners', 'invite'].map((c) => h('option', { value: c }, c))),
-  };
-  const list = h('div');
-  const load = async () => {
-    const r = await api('/tasks');
-    list.replaceChildren(...r.items.map((t) => h('div', { class: 'card' },
-      h('b', {}, t.title), ' ', h('span', { class: 'mut' }, (t.category || 'in_game') + ' | +' + t.reward),
-      h('div', { class: 'mut' }, t.url || ''),
-      h('div', { class: 'grid' },
-        h('button', { class: 'ghost', onclick: () => {
-          f.id.value = t.id; f.title.value = t.title || ''; f.description.value = t.description || '';
-          f.reward.value = t.reward || 0; f.url.value = t.url || ''; f.category.value = t.category || 'in_game';
-          window.scrollTo(0, 0);
-        } }, 'Edit'),
-        h('button', { class: 'bad', onclick: guard(async () => {
-          if (!confirm('Delete this task?')) return;
-          await api('/tasks/' + t.id, 'DELETE'); await load();
-        }) }, 'Delete')))));
-  };
-  const save = guard(async () => {
-    await api('/tasks', 'POST', {
-      id: f.id.value || undefined, title: f.title.value, description: f.description.value,
-      reward: Number(f.reward.value), url: f.url.value, category: f.category.value,
-    });
-    Object.values(f).forEach((x) => { if (x.tagName !== 'SELECT') x.value = ''; });
-    toast('Saved'); await load();
-  });
-  view.append(h('div', { class: 'card' }, h('b', {}, 'Add / edit task'), ...Object.values(f), h('button', { onclick: save }, 'Save task')), list);
-  await load();
+function mining() {
+  let rows = '';
+  for (let l = 1; l <= 50; l++) rows += '<tr><td>' + l + '</td><td class="mono">' + f(l * 500) + '</td><td class="mono">' + (l === 1 ? 'Free' : f(l * 1000)) + '</td></tr>';
+  return '<h1>Mining</h1><div class="card" style="margin-bottom:14px"><div class="form"><label>PAWS per tap<input class="inp" data-s="tap" value="' + esc(S.set.tap) + '"></label><label>Session duration (hours)<input class="inp" data-s="dur" value="' + esc(S.set.dur) + '"></label><label>Auto Tap fee (TON)<input class="inp" data-s="afee" value="' + esc(S.set.afee) + '"></label></div><div style="margin-top:12px"><button class="btn" data-a="save">Save mining config</button></div></div><div class="k" style="margin-bottom:6px">Level table (taps = level × 500, holding = level × 1,000)</div><div class="tw" style="max-height:360px;overflow-y:auto"><table><tr><th>Level</th><th>Max taps / session</th><th>Required holding</th></tr>' + rows + '</table></div>';
 }
 
-async function withdrawals() {
-  const r = await api('/withdrawals');
-  if (!r.items.length) return view.append(h('p', { class: 'mut' }, 'No withdrawal requests yet.'));
-  const set = (w, status) => guard(async () => { await api('/withdrawals/' + w.id, 'POST', { status }); show('withdrawals'); });
-  for (const w of r.items) view.append(h('div', { class: 'card' },
-    h('b', {}, w.amount + ' PAWS'), ' ', h('span', { class: 'mut' }, 'user #' + w.user + ' | ' + w.status),
-    h('div', { class: 'mut' }, w.wallet || ''),
-    h('div', { class: 'grid' },
-      h('button', { onclick: set(w, 'completed') }, 'Approve'),
-      h('button', { class: 'bad', onclick: set(w, 'rejected') }, 'Reject'))));
+function ref() {
+  const d = S.d;
+  return '<h1>Referrals</h1><div class="grid"><div class="card"><div class="k">Commission</div><div class="v">' + esc(S.set.refpct) + '%</div></div><div class="card"><div class="k">Total referrals</div><div class="v">' + f(d.total) + '</div></div><div class="card"><div class="k">Flagged for review</div><div class="v">' + d.items.filter((x) => x.flag).length + '</div></div></div><div class="card" style="margin-bottom:14px"><div class="form"><label>Referral percentage<input class="inp" data-s="refpct" value="' + esc(S.set.refpct) + '"></label></div><div style="margin-top:12px"><button class="btn" data-a="save">Save</button></div></div><div class="tw"><table><tr><th>Referrer</th><th>Invited</th><th>Verified</th><th>Flag</th></tr>' +
+    (d.items.length ? d.items.map((x) => '<tr><td>' + esc(x.name) + '</td><td class="mono">' + f(x.count) + '</td><td class="mono">' + f(x.verified) + '</td><td>' + (x.flag ? '<span class="pill b">review</span>' : '<span class="pill ok">ok</span>') + '</td></tr>').join('') : '<tr><td class="m" colspan="4">No referrals yet</td></tr>') + '</table></div><p class="m">Flag rule: 20+ invites and none with a verified wallet. It is a hint, not proof.</p>';
 }
 
-async function broadcast() {
-  const t = h('textarea', { rows: 4, placeholder: 'Message to all users (max 1000 chars)' });
-  view.append(h('div', { class: 'card' }, t,
-    h('p', { class: 'mut' }, 'Only users who started the bot can receive it. Max 500 users per send.'),
-    h('button', { onclick: guard(async () => {
-      if (!confirm('Send this message to all users?')) return;
-      const r = await api('/broadcast', 'POST', { text: t.value });
-      toast('Sent: ' + r.sent + ', failed: ' + r.failed); t.value = '';
-    }) }, 'Send')));
+function wal() {
+  return '<h1>Wallets</h1><div class="tw"><table><tr><th>User</th><th>Wallet</th><th>Verification</th><th>Auto Tap</th><th></th></tr>' +
+    (S.d.items.length ? S.d.items.map((u) => '<tr><td>' + esc(u.username) + '</td><td class="mono">' + esc(u.wallet.slice(0, 8) + '…' + u.wallet.slice(-6)) + '</td><td>' + (u.verified ? pill('verified') : pill('pending')) + '</td><td>' + (u.autotap ? pill('active') : '<span class="pill">no</span>') + '</td><td><button class="btn sm ' + (u.verified ? 'bad' : 'ok') + '" data-a="ver:' + esc(u.id) + ':' + (u.verified ? 0 : 1) + '">' + (u.verified ? 'Remove' : 'Mark verified') + '</button></td></tr>').join('') : '<tr><td class="m" colspan="5">No wallets connected yet</td></tr>') + '</table></div><p class="m">"Mark verified" is a manual admin override (logged). Automatic on-chain payment verification is not built yet.</p>';
 }
 
-async function auditLog() {
-  const r = await api('/audit');
-  if (!r.items.length) return view.append(h('p', { class: 'mut' }, 'No actions yet.'));
-  for (const a of r.items) view.append(h('div', { class: 'card' },
-    h('b', {}, a.action), ' ', h('span', { class: 'mut' }, a.admin + ' | ' + (a.at ? new Date(a.at).toLocaleString() : '')),
-    h('div', { class: 'mut' }, JSON.stringify(a.details || {}))));
+function wd() {
+  return '<h1>Withdrawals</h1><div class="tw"><table><tr><th>User</th><th>Amount</th><th>Status</th><th>Tx hash</th><th>Actions</th></tr>' +
+    (S.d.items.length ? S.d.items.map((w) => {
+      let a = '';
+      if (w.status === 'pending') a = '<button class="btn sm ok" data-a="wa:' + esc(w.id) + '">Approve</button> <button class="btn sm bad" data-a="wr:' + esc(w.id) + '">Reject</button>';
+      else if (w.status === 'approved') a = '<input class="inp mono" id="h' + esc(w.id) + '" placeholder="tx hash" style="width:130px"> <button class="btn sm" data-a="wc:' + esc(w.id) + '">Mark processed</button> <button class="btn sm bad" data-a="wr:' + esc(w.id) + '">Reject</button>';
+      return '<tr><td>' + esc(w.username) + '</td><td class="mono">' + f(w.amount) + ' PAWS</td><td>' + pill(w.status) + '</td><td class="mono">' + esc(w.tx || '—') + '</td><td>' + a + '</td></tr>';
+    }).join('') : '<tr><td class="m" colspan="5">No withdrawal requests yet</td></tr>') + '</table></div><p class="m">Send the Jetton transfer yourself first, then paste its hash and mark processed. Rejecting returns the held points to the user.</p>';
 }
 
-const TABS = { Dashboard: dashboard, Users: users, Tasks: tasks, Withdrawals: withdrawals, Broadcast: broadcast, Audit: auditLog };
-function show(name) {
-  view.replaceChildren();
-  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('ghost', b.textContent !== name));
-  TABS[name]().catch((e) => toast(e.message));
+function set() {
+  const F = [['project', 'Project name'], ['token', 'Token name'], ['symbol', 'Token symbol'], ['jetton', 'Jetton master address'], ['adminw', 'Admin TON wallet'], ['vfee', 'Wallet verification fee (TON)'], ['minwd', 'Minimum withdrawal (PAWS)'], ['rate', 'Conversion rate'], ['comm', 'Community link']];
+  return '<h1>Settings</h1><div class="card"><div class="form">' + F.map((x) => '<label>' + x[1] + '<input class="inp" data-s="' + x[0] + '" value="' + esc(S.set[x[0]]) + '" placeholder="' + (x[0] === 'jetton' || x[0] === 'adminw' ? 'Not configured' : '') + '"></label>').join('') + '</div><div style="margin-top:12px"><button class="btn" data-a="save">Save settings</button></div></div>';
 }
-$('tabs').append(...Object.keys(TABS).map((n) => h('button', { onclick: () => show(n) }, n)));
+
+function log() {
+  return '<h1>Audit log</h1><div class="tw"><table><tr><th>Time</th><th>Admin</th><th>Action</th></tr>' +
+    (S.d.items.length ? S.d.items.map((l) => '<tr><td class="mono">' + esc(l.at ? new Date(l.at).toLocaleString() : '') + '</td><td class="m">' + esc(l.admin) + '</td><td>' + esc(l.action) + '</td></tr>').join('') : '<tr><td class="m" colspan="3">No actions yet</td></tr>') + '</table></div>';
+}
+
+const V = { dash, users, tasks, mining, ref, wal, wd, set, log };
+
+function render() {
+  const keep = document.activeElement && document.activeElement.id === 'q' ? document.activeElement.selectionStart : null;
+  $('nav').innerHTML = '<div class="brand">$PAWS Admin</div>' + N.map((n) => '<button class="' + (S.tab === n[0] ? 'on' : '') + '" data-a="tab:' + n[0] + '"><span>' + n[1] + '</span>' + n[2] + '</button>').join('') + '<div class="me">' + esc(auth.currentUser?.email || '') + '<br><button data-a="out" style="padding:6px 0">Logout</button></div>';
+  $('v').innerHTML = S.d ? V[S.tab]() : '<p class="m">Loading…</p>';
+  if (keep !== null && $('q')) { $('q').focus(); $('q').setSelectionRange(keep, keep); }
+}
+
+async function load() {
+  const tab = S.tab;
+  try {
+    const ep = EP[tab];
+    const needsSettings = ['mining', 'ref', 'set'].includes(tab);
+    const [d, s] = await Promise.all([
+      ep ? api(ep === '/users' ? '/users?q=' + encodeURIComponent(S.q.trim()) : ep) : Promise.resolve({}),
+      needsSettings ? api('/settings') : Promise.resolve(null),
+    ]);
+    if (tab !== S.tab) return;
+    S.d = d;
+    if (s) S.set = s;
+  } catch (e) { toast(e.message); S.d = S.d || null; }
+  render();
+}
+
+let qTimer;
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(load, 400); }
+  const k = e.target.getAttribute && e.target.getAttribute('data-s');
+  if (k) S.set[k] = e.target.value;
+});
+
+document.addEventListener('change', async (e) => {
+  const id = e.target.getAttribute && e.target.getAttribute('data-lv');
+  if (!id) return;
+  try { await api('/users/' + id, 'POST', { level: Number(e.target.value) }); toast('Level updated'); } catch (err) { toast(err.message); }
+});
+
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-a]');
+  if (!el) return;
+  const [k, v, w] = el.getAttribute('data-a').split(':');
+  try {
+    if (k === 'tab') { S.tab = v; S.d = null; render(); return load(); }
+    if (k === 'out') return signOut(auth);
+    if (k === 'blk') await api('/users/' + v, 'POST', { blocked: w === '1' });
+    else if (k === 'pts') {
+      const n = prompt('New points balance for user ' + v + ':');
+      if (n === null || n.trim() === '') return;
+      await api('/users/' + v, 'POST', { balance: Number(n) });
+    }
+    else if (k === 'tog') await api('/tasks', 'POST', { id: v, enabled: w === '1' });
+    else if (k === 'del') { if (!confirm('Delete this task?')) return; await api('/tasks/' + v, 'DELETE'); }
+    else if (k === 'addt') {
+      await api('/tasks', 'POST', { title: $('nt').value, reward: Number($('nr').value), url: $('nu').value, category: $('nc').value, verify: $('nv').value });
+    }
+    else if (k === 'sa' || k === 'sr') await api('/submissions/' + v, 'POST', { status: k === 'sa' ? 'completed' : 'rejected' });
+    else if (k === 'ver') await api('/wallets/' + v, 'POST', { verified: w === '1' });
+    else if (k === 'wa') await api('/withdrawals/' + v, 'POST', { status: 'approved' });
+    else if (k === 'wr') { if (!confirm('Reject and refund the points?')) return; await api('/withdrawals/' + v, 'POST', { status: 'rejected' }); }
+    else if (k === 'wc') await api('/withdrawals/' + v, 'POST', { status: 'completed', tx: $('h' + v).value });
+    else if (k === 'save') await api('/settings', 'POST', S.set);
+    toast('Done');
+    await load();
+  } catch (err) { toast(err.message); }
+});
 
 $('go').onclick = () => {
   $('lerr').textContent = '';
   signInWithEmailAndPassword(auth, $('em').value.trim(), $('pw').value).catch(() => ($('lerr').textContent = 'Login failed'));
 };
-$('out').onclick = () => signOut(auth);
 onAuthStateChanged(auth, (user) => {
   $('login').hidden = !!user;
   $('app').hidden = !user;
-  if (user) show('Dashboard');
+  if (user) { S.tab = 'dash'; S.d = null; render(); load(); }
 });
 </script>
-</body></html>
+</body>
+</html>
