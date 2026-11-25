@@ -2,9 +2,20 @@ import express from 'express';
 import { getAuth } from 'firebase-admin/auth';
 import { AggregateField, FieldValue } from 'firebase-admin/firestore';
 
-const emails = () => (process.env.ADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+export const DEFAULTS = {
+  project: '$PAWS', token: 'PAWS', symbol: 'PAWS', jetton: '', adminw: '',
+  vfee: 0.15, afee: 0.05, minwd: 10000, rate: '1,000 PAWS = 0.01 TON',
+  refpct: 10, tap: 1, dur: 2, comm: '',
+};
+const NUM = ['vfee', 'afee', 'minwd', 'refpct', 'tap', 'dur'];
+const STR = ['project', 'token', 'symbol', 'jetton', 'adminw', 'rate', 'comm'];
 const CATS = ['in_game', 'partners', 'invite'];
+const emails = () => (process.env.ADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+
+export async function loadSettings(db) {
+  const s = await db.collection('config').doc('app').get();
+  return { ...DEFAULTS, ...(s.exists ? s.data() : {}) };
+}
 
 export default function adminRouter(db) {
   const r = express.Router();
@@ -12,8 +23,11 @@ export default function adminRouter(db) {
     Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: e.message }));
   const audit = (req, action, details = {}) =>
     db.collection('audit_logs').add({ admin: req.admin, action, details, at: FieldValue.serverTimestamp() });
+  const count = async (q) => (await q.count().get()).data().count;
+  const sum = async (col, field) =>
+    (await db.collection(col).aggregate({ t: AggregateField.sum(field) }).get()).data().t || 0;
 
-  // Every admin route requires a valid Firebase login whose email is in ADMIN_EMAILS
+  // Every admin route needs a valid Firebase login whose email is in ADMIN_EMAILS
   r.use(async (req, res, next) => {
     try {
       const token = (req.headers.authorization || '').replace(/^Bearer /, '');
@@ -26,22 +40,41 @@ export default function adminRouter(db) {
     } catch { res.status(401).json({ error: 'Invalid login' }); }
   });
 
-  const shape = (d) => {
-    const u = d.data();
-    return { id: d.id, name: u.first_name || u.username || 'User', username: u.username || '',
-      balance: u.balance || 0, level: u.level || 1, blocked: !!u.blocked,
-      wallet: u.wallet || null, walletVerified: !!u.walletVerified, referralCount: u.referralCount || 0 };
-  };
-
+  // ---- Dashboard ----
   r.get('/stats', wrap(async (req, res) => {
-    const [users, tasks, agg] = await Promise.all([
-      db.collection('users').count().get(),
-      db.collection('tasks').count().get(),
-      db.collection('users').aggregate({ total: AggregateField.sum('balance') }).get(),
+    const cfg = await loadSettings(db);
+    const users = db.collection('users');
+    const wds = db.collection('withdrawals');
+    const n = new Date();
+    const today = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate());
+    const days = [6, 5, 4, 3, 2, 1, 0].map((i) => today - i * 86400000);
+    const [total, active, distributed, verified, autotap, referrals, pend, done, ...chart] = await Promise.all([
+      count(users),
+      count(users.where('lastSeen', '>=', Date.now() - 86400000)),
+      sum('users', 'balance'),
+      count(users.where('walletVerified', '==', true)),
+      count(users.where('autoTap', '==', true)),
+      sum('users', 'referralCount'),
+      count(wds.where('status', '==', 'pending')),
+      count(wds.where('status', '==', 'completed')),
+      ...days.map((d) => count(users.where('createdAt', '>=', new Date(d)).where('createdAt', '<', new Date(d + 86400000)))),
     ]);
-    res.json({ users: users.data().count, tasks: tasks.data().count, total_points: agg.data().total || 0 });
+    res.json({
+      users: total, active24h: active, distributed, verified,
+      verification_ton: verified * cfg.vfee, autotap, referrals,
+      wd_pending: pend, wd_completed: done, chart,
+    });
   }));
 
+  // ---- Users ----
+  const shape = (d) => {
+    const u = d.data();
+    return {
+      id: d.id, username: u.username || '', name: u.first_name || '',
+      balance: u.balance || 0, level: u.level || 1, blocked: !!u.blocked,
+      wallet: u.wallet || '', verified: !!u.walletVerified,
+    };
+  };
   r.get('/users', wrap(async (req, res) => {
     const q = String(req.query.q || '').trim().replace(/^@/, '');
     let docs = [];
@@ -55,7 +88,6 @@ export default function adminRouter(db) {
     }
     res.json({ items: docs.map(shape) });
   }));
-
   r.post('/users/:id', wrap(async (req, res) => {
     const id = String(req.params.id);
     if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'Bad user id' });
@@ -75,73 +107,170 @@ export default function adminRouter(db) {
       patch.level = n;
     }
     if (b.blocked !== undefined) patch.blocked = !!b.blocked;
-    const before = snap.data();
+    const u = snap.data();
     await ref.update(patch);
-    await audit(req, 'user.update', { id, before: { balance: before.balance, level: before.level, blocked: !!before.blocked }, after: patch });
+    const who = u.username || id;
+    const text = patch.blocked !== undefined ? `${patch.blocked ? 'Blocked' : 'Unblocked'} ${who}`
+      : patch.level !== undefined ? `Set level of ${who} to ${patch.level}`
+      : `Set points of ${who} to ${patch.balance}`;
+    await audit(req, text, { id, before: { balance: u.balance, level: u.level, blocked: !!u.blocked }, after: patch });
     res.json({ ok: true });
   }));
 
+  // ---- Tasks + manual submissions ----
   r.get('/tasks', wrap(async (req, res) => {
-    const s = await db.collection('tasks').get();
-    res.json({ items: s.docs.map((d) => ({ id: d.id, ...d.data() })) });
+    const [t, s] = await Promise.all([
+      db.collection('tasks').get(),
+      db.collection('task_submissions').where('status', '==', 'pending').limit(50).get(),
+    ]);
+    res.json({
+      items: t.docs.map((d) => ({
+        id: d.id, icon: d.data().icon || '', title: d.data().title || '', reward: d.data().reward || 0,
+        category: d.data().category || 'in_game', verify: d.data().verify || 'auto',
+        url: d.data().url || d.data().link || '', enabled: d.data().enabled !== false,
+      })),
+      subs: s.docs.map((d) => ({ id: d.id, username: d.data().username || d.data().user, title: d.data().title || '', status: d.data().status })),
+    });
   }));
   r.post('/tasks', wrap(async (req, res) => {
     const b = req.body || {};
-    const title = String(b.title || '').trim().slice(0, 100);
-    const reward = Number(b.reward);
-    if (!title || !Number.isFinite(reward) || reward < 0) return res.status(400).json({ error: 'Title and valid reward required' });
-    const data = {
-      title, reward: Math.floor(reward),
-      description: String(b.description || '').slice(0, 300),
-      url: String(b.url || '').trim().slice(0, 500),
-      category: CATS.includes(b.category) ? b.category : 'in_game',
-    };
-    if (b.id) await db.collection('tasks').doc(String(b.id)).set(data, { merge: true });
-    else await db.collection('tasks').add(data);
-    await audit(req, 'task.save', { id: b.id || null, title });
+    const data = {};
+    if (b.title !== undefined) data.title = String(b.title).trim().slice(0, 100);
+    if (b.reward !== undefined) {
+      const n = Number(b.reward);
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Invalid reward' });
+      data.reward = Math.floor(n);
+    }
+    if (b.category !== undefined && CATS.includes(b.category)) data.category = b.category;
+    if (b.verify !== undefined) data.verify = b.verify === 'manual' ? 'manual' : 'auto';
+    if (b.url !== undefined) data.url = String(b.url).trim().slice(0, 500);
+    if (b.icon !== undefined) data.icon = String(b.icon).slice(0, 8);
+    if (b.enabled !== undefined) data.enabled = !!b.enabled;
+    if (!b.id) {
+      if (!data.title || data.reward === undefined) return res.status(400).json({ error: 'Title and reward required' });
+      await db.collection('tasks').add({ category: 'in_game', verify: 'auto', enabled: true, ...data });
+      await audit(req, `Added task "${data.title}" (${data.reward} PAWS)`);
+    } else {
+      await db.collection('tasks').doc(String(b.id)).set(data, { merge: true });
+      await audit(req, `Updated task ${b.id}`, data);
+    }
     res.json({ ok: true });
   }));
   r.delete('/tasks/:id', wrap(async (req, res) => {
     await db.collection('tasks').doc(String(req.params.id)).delete();
-    await audit(req, 'task.delete', { id: req.params.id });
+    await audit(req, `Deleted task ${req.params.id}`);
+    res.json({ ok: true });
+  }));
+  r.post('/submissions/:id', wrap(async (req, res) => {
+    const status = String(req.body?.status || '');
+    if (!['completed', 'rejected'].includes(status)) return res.status(400).json({ error: 'Bad status' });
+    const ref = db.collection('task_submissions').doc(String(req.params.id));
+    const out = await db.runTransaction(async (t) => {
+      const s = await t.get(ref);
+      if (!s.exists) return { code: 404, error: 'Not found' };
+      const sub = s.data();
+      if (sub.status !== 'pending') return { code: 400, error: 'Already reviewed' };
+      const userRef = db.collection('users').doc(String(sub.user));
+      const taskRef = userRef.collection('tasks').doc(String(sub.task_id));
+      if (status === 'completed') {
+        t.update(userRef, { balance: FieldValue.increment(sub.reward || 0) });
+        t.set(taskRef, { completed: true, completedAt: Date.now(), submitted: false }, { merge: true });
+      } else {
+        t.set(taskRef, { submitted: false }, { merge: true });
+      }
+      t.update(ref, { status });
+      return { ok: true, sub };
+    });
+    if (out.error) return res.status(out.code).json({ error: out.error });
+    await audit(req, `${status === 'completed' ? 'Approved' : 'Rejected'} submission by ${out.sub.username || out.sub.user}`);
     res.json({ ok: true });
   }));
 
+  // ---- Settings (also used by the Mining and Referrals tabs) ----
+  r.get('/settings', wrap(async (req, res) => res.json(await loadSettings(db))));
+  r.post('/settings', wrap(async (req, res) => {
+    const b = req.body || {};
+    const patch = {};
+    for (const k of NUM) {
+      if (b[k] === undefined || b[k] === '') continue;
+      const n = Number(b[k]);
+      if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Invalid value for ' + k });
+      patch[k] = n;
+    }
+    if (patch.refpct !== undefined && patch.refpct > 100) return res.status(400).json({ error: 'Referral % max is 100' });
+    if (patch.dur !== undefined && (patch.dur < 0.5 || patch.dur > 24)) return res.status(400).json({ error: 'Session hours must be 0.5-24' });
+    if (patch.tap !== undefined) patch.tap = Math.max(1, Math.floor(patch.tap));
+    if (patch.minwd !== undefined) patch.minwd = Math.floor(patch.minwd);
+    for (const k of STR) if (b[k] !== undefined) patch[k] = String(b[k]).trim().slice(0, 200);
+    await db.collection('config').doc('app').set(patch, { merge: true });
+    await audit(req, 'Saved configuration', { keys: Object.keys(patch) });
+    res.json({ ok: true });
+  }));
+
+  // ---- Referrals ----
+  r.get('/referrals', wrap(async (req, res) => {
+    const [total, top] = await Promise.all([
+      sum('users', 'referralCount'),
+      db.collection('users').orderBy('referralCount', 'desc').limit(15).get(),
+    ]);
+    const items = await Promise.all(top.docs.filter((d) => (d.data().referralCount || 0) > 0).map(async (d) => {
+      const n = d.data().referralCount || 0;
+      const verified = await count(db.collection('users').where('referredBy', '==', d.id).where('walletVerified', '==', true));
+      return { id: d.id, name: d.data().username || d.data().first_name || 'User', count: n, verified, flag: n >= 20 && verified === 0 };
+    }));
+    res.json({ total, items });
+  }));
+
+  // ---- Wallets ----
+  r.get('/wallets', wrap(async (req, res) => {
+    const s = await db.collection('users').where('wallet', '!=', null).limit(100).get();
+    res.json({ items: s.docs.map((d) => ({
+      id: d.id, username: d.data().username || d.data().first_name || d.id,
+      wallet: d.data().wallet, verified: !!d.data().walletVerified, autotap: !!d.data().autoTap,
+    })) });
+  }));
+  r.post('/wallets/:id', wrap(async (req, res) => {
+    const id = String(req.params.id);
+    const verified = !!req.body?.verified;
+    await db.collection('users').doc(id).update({ walletVerified: verified });
+    await audit(req, `${verified ? 'Marked verified' : 'Removed verification of'} wallet for user ${id}`);
+    res.json({ ok: true });
+  }));
+
+  // ---- Withdrawals ----
   r.get('/withdrawals', wrap(async (req, res) => {
     const s = await db.collection('withdrawals').orderBy('createdAt', 'desc').limit(50).get();
-    res.json({ items: s.docs.map((d) => ({ id: d.id, user: d.data().user, amount: d.data().amount, wallet: d.data().wallet, status: d.data().status || 'pending' })) });
+    res.json({ items: s.docs.map((d) => ({
+      id: d.id, username: d.data().username || d.data().user, amount: d.data().amount || 0,
+      status: d.data().status || 'pending', tx: d.data().tx || '', wallet: d.data().wallet || '',
+    })) });
   }));
   r.post('/withdrawals/:id', wrap(async (req, res) => {
     const status = String(req.body?.status || '');
-    if (!['pending', 'completed', 'rejected'].includes(status)) return res.status(400).json({ error: 'Bad status' });
-    await db.collection('withdrawals').doc(String(req.params.id)).update({ status });
-    await audit(req, 'withdrawal.' + status, { id: req.params.id });
+    const tx = String(req.body?.tx || '').trim().slice(0, 200);
+    const ref = db.collection('withdrawals').doc(String(req.params.id));
+    const out = await db.runTransaction(async (t) => {
+      const s = await t.get(ref);
+      if (!s.exists) return { code: 404, error: 'Not found' };
+      const w = s.data();
+      const ok = (w.status === 'pending' && ['approved', 'rejected'].includes(status))
+        || (w.status === 'approved' && ['completed', 'rejected'].includes(status));
+      if (!ok) return { code: 400, error: 'Invalid status change' };
+      if (status === 'completed' && !tx) return { code: 400, error: 'Transaction hash required' };
+      // Rejected requests give the held points back to the user
+      if (status === 'rejected') t.update(db.collection('users').doc(String(w.user)), { balance: FieldValue.increment(w.amount) });
+      t.update(ref, { status, ...(status === 'completed' ? { tx } : {}), updatedAt: FieldValue.serverTimestamp() });
+      return { ok: true, w };
+    });
+    if (out.error) return res.status(out.code).json({ error: out.error });
+    await audit(req, `${status} withdrawal of ${out.w.amount} for ${out.w.username || out.w.user}${tx ? ' (tx ' + tx + ')' : ''}`);
     res.json({ ok: true });
   }));
 
-  r.post('/broadcast', wrap(async (req, res) => {
-    const text = String(req.body?.text || '').trim().slice(0, 1000);
-    if (!text) return res.status(400).json({ error: 'Message is empty' });
-    const token = (process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '').trim();
-    if (!token) return res.status(500).json({ error: 'Bot token not set' });
-    const ids = (await db.collection('users').limit(500).get()).docs.map((d) => d.id);
-    let sent = 0, failed = 0;
-    for (let i = 0; i < ids.length; i += 20) {
-      const out = await Promise.allSettled(ids.slice(i, i + 20).map((id) =>
-        fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: id, text }),
-        }).then((x) => x.ok)));
-      out.forEach((o) => (o.status === 'fulfilled' && o.value ? sent++ : failed++));
-      await sleep(1000);
-    }
-    await audit(req, 'broadcast', { sent, failed });
-    res.json({ sent, failed });
-  }));
-
+  // ---- Audit log ----
   r.get('/audit', wrap(async (req, res) => {
-    const s = await db.collection('audit_logs').orderBy('at', 'desc').limit(50).get();
-    res.json({ items: s.docs.map((d) => ({ admin: d.data().admin, action: d.data().action, details: d.data().details, at: d.data().at?.toMillis?.() || null })) });
+    const s = await db.collection('audit_logs').orderBy('at', 'desc').limit(60).get();
+    res.json({ items: s.docs.map((d) => ({ at: d.data().at?.toMillis?.() || null, admin: d.data().admin, action: d.data().action })) });
   }));
 
   return r;
