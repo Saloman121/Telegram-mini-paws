@@ -2,7 +2,7 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import adminRouter from './admin.js';
+import adminRouter, { loadSettings } from './admin.js';
 
 // ---- Firebase init ----
 const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
@@ -13,22 +13,27 @@ const db = getFirestore();
 const app = express();
 app.use(express.json());
 
-// Admin panel API (protected by Firebase login + ADMIN_EMAILS). Must come before the Telegram-auth router.
+// Admin panel API (Firebase login + ADMIN_EMAILS). Must come before the Telegram-auth router.
 app.use('/api/admin', adminRouter(db));
 
-// ---- Config (placeholders: change to your real values) ----
-const SESSION_MS = 2 * 60 * 60 * 1000; // 2 hour tap session
 const MAX_LEVEL = 50;
-const REFERRAL_PERCENT = 10;
-const CONFIG = {
+
+// Settings come from Firestore (config/app), edited in the admin panel. Cached for 30s.
+let cfgCache = { at: 0, v: null };
+async function getConfig() {
+  if (cfgCache.v && Date.now() - cfgCache.at < 30000) return cfgCache.v;
+  cfgCache = { at: Date.now(), v: await loadSettings(db) };
+  return cfgCache.v;
+}
+const publicConfig = (c) => ({
   max_level: MAX_LEVEL,
-  links: { community: '', rewards: '' },
-  referral_percent: REFERRAL_PERCENT,
-  verification_fee_ton: 0.15,
-  auto_tap_fee_ton: 0.05,
-  min_withdrawal: 10000,
-  conversion_rate: 1000,
-};
+  links: { community: c.comm || '', rewards: '' },
+  referral_percent: c.refpct,
+  verification_fee_ton: c.vfee,
+  auto_tap_fee_ton: c.afee,
+  min_withdrawal: c.minwd,
+  conversion_rate: c.rate,
+});
 
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: e.message }));
@@ -61,7 +66,7 @@ async function auth(req, res, next) {
         id: String(tg.id), username: tg.username || '', first_name: tg.first_name || '',
         balance: 0, level: 1, sessionTaps: 0, sessionStart: 0,
         referredBy: null, referralCount: 0, referralEarnings: 0,
-        wallet: null, walletVerified: false, autoTap: false,
+        wallet: null, walletVerified: false, autoTap: false, lastSeen: Date.now(),
         createdAt: FieldValue.serverTimestamp(),
       });
       snap = await ref.get();
@@ -77,9 +82,10 @@ const r = express.Router();
 r.use(auth);
 
 // ---- Helpers ----
-function session(u) {
+const sessionMs = (cfg) => cfg.dur * 60 * 60 * 1000;
+function session(u, cfg) {
   const now = Date.now();
-  if (now - (u.sessionStart || 0) > SESSION_MS) return { taps: 0, start: now };
+  if (now - (u.sessionStart || 0) > sessionMs(cfg)) return { taps: 0, start: now };
   return { taps: u.sessionTaps || 0, start: u.sessionStart };
 }
 
@@ -87,14 +93,14 @@ const RANKS = ['Rookie', 'Cub', 'Hunter', 'Ranger', 'Alpha', 'Legend'];
 const rankTitle = (lvl) => RANKS[Math.min(RANKS.length - 1, Math.floor((lvl - 1) / 10))];
 const displayName = (d) => d.first_name || d.username || 'User';
 
-// Level table: Level x 500 taps / 2h, Level x 1,000 PAWS holding (level 1 free)
+// Level table: Level x 500 taps / session, Level x 1,000 PAWS holding (level 1 free)
 const LEVELS = Array.from({ length: MAX_LEVEL }, (_, i) => {
   const level = i + 1;
   return { level, max_taps: level * 500, required_holding: level === 1 ? 0 : level * 1000 };
 });
 
-function shapeProfile(u) {
-  const s = session(u);
+function shapeProfile(u, cfg) {
+  const s = session(u, cfg);
   const max = u.level * 500;
   return {
     id: u.id, username: u.username, first_name: u.first_name,
@@ -104,16 +110,20 @@ function shapeProfile(u) {
     wallet: u.wallet || null,
     referral_code: u.id,
     mining: {
-      energy: Math.max(0, max - s.taps), max_energy: max, per_tap: 1,
+      energy: Math.max(0, max - s.taps), max_energy: max, per_tap: cfg.tap,
       auto_tap_active: !!u.autoTap, auto_claimable: 0,
     },
-    config: CONFIG,
+    config: publicConfig(cfg),
   };
 }
 
 // ---- Auth / user ----
-r.post('/auth/telegram', wrap((req, res) => res.json({ ok: true, user: shapeProfile(req.user) })));
-r.get('/user/profile', wrap((req, res) => res.json(shapeProfile(req.user))));
+r.post('/auth/telegram', wrap(async (req, res) => {
+  const cfg = await getConfig();
+  await req.ref.update({ lastSeen: Date.now() });
+  res.json({ ok: true, user: shapeProfile(req.user, cfg) });
+}));
+r.get('/user/profile', wrap(async (req, res) => res.json(shapeProfile(req.user, await getConfig()))));
 r.get('/user/balance', wrap((req, res) => res.json({ balance: req.user.balance })));
 
 r.get('/user/level', wrap((req, res) => {
@@ -131,18 +141,20 @@ r.post('/user/level/upgrade', wrap((req, res) =>
 r.post('/mining/tap', wrap(async (req, res) => {
   const u = req.user;
   if (u.blocked) return res.status(403).json({ error: 'Account blocked' });
+  const cfg = await getConfig();
   const max = u.level * 500;
-  const s = session(u);
+  const s = session(u, cfg);
   const want = Math.max(0, Math.min(Number(req.body.count) || 0, 100));
   const allowed = Math.max(0, Math.min(want, max - s.taps));
+  const gain = allowed * cfg.tap;
   await req.ref.update({
-    balance: FieldValue.increment(allowed),
+    balance: FieldValue.increment(gain),
     sessionTaps: s.taps + allowed, sessionStart: s.start,
   });
 
   // Referral bonus: only credited if the referrer has a verified wallet
-  if (u.referredBy && allowed > 0) {
-    const bonus = Math.floor((allowed * REFERRAL_PERCENT) / 100);
+  if (u.referredBy && gain > 0) {
+    const bonus = Math.floor((gain * cfg.refpct) / 100);
     if (bonus > 0) {
       const refRef = db.collection('users').doc(u.referredBy);
       const refSnap = await refRef.get();
@@ -156,15 +168,16 @@ r.post('/mining/tap', wrap(async (req, res) => {
   }
 
   res.json({
-    added: allowed,
-    points: u.balance + allowed,
+    added: gain,
+    points: u.balance + gain,
     energy: Math.max(0, max - (s.taps + allowed)),
   });
 }));
-r.get('/mining/status', wrap((req, res) => {
-  const s = session(req.user);
+r.get('/mining/status', wrap(async (req, res) => {
+  const cfg = await getConfig();
+  const s = session(req.user, cfg);
   res.json({ sessionTaps: s.taps, maxTaps: req.user.level * 500,
-             resetsAt: s.start + SESSION_MS, balance: req.user.balance });
+             resetsAt: s.start + sessionMs(cfg), balance: req.user.balance });
 }));
 r.post('/mining/claim', wrap((req, res) => res.json({ claimed: 0, balance: req.user.balance })));
 
@@ -196,9 +209,7 @@ r.post('/referrals/process', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---- Tasks ----
-// Admin adds docs in Firestore "tasks": { title, description, reward (number), url, category }
-// category must be one of: in_game | partners | invite
+// ---- Tasks (managed from the admin panel) ----
 r.get('/tasks', wrap(async (req, res) => {
   const [all, mine] = await Promise.all([
     db.collection('tasks').get(),
@@ -206,17 +217,19 @@ r.get('/tasks', wrap(async (req, res) => {
   ]);
   const state = new Map(mine.docs.map((d) => [d.id, d.data()]));
   res.json({
-    items: all.docs.map((d) => {
+    items: all.docs.filter((d) => d.data().enabled !== false).map((d) => {
       const t = d.data();
       const m = state.get(d.id) || {};
       return {
         task_id: d.id,
         category: t.category || 'in_game',
+        icon: t.icon || '',
         title: t.title || 'Task',
         description: t.description || '',
         reward: Number(t.reward) || 0,
         link: t.url || t.link || '',
-        status: m.completed ? 'completed' : m.startedAt ? 'started' : 'available',
+        verify: t.verify || 'auto',
+        status: m.completed ? 'completed' : m.submitted ? 'pending' : m.startedAt ? 'started' : 'available',
       };
     }),
   });
@@ -229,20 +242,34 @@ r.post('/tasks/start', wrap(async (req, res) => {
   res.json({ ok: true, link: t.data().url || t.data().link || '' });
 }));
 r.post('/tasks/complete', wrap(async (req, res) => {
+  if (req.user.blocked) return res.status(403).json({ error: 'Account blocked' });
   const id = String(req.body.task_id);
   const t = await db.collection('tasks').doc(id).get();
   if (!t.exists) return res.status(404).json({ error: 'Task not found' });
+  const task = t.data();
   const mine = req.ref.collection('tasks').doc(id);
   const m = await mine.get();
   if (!m.exists || !m.data().startedAt) return res.status(400).json({ error: 'Start the task first' });
   if (m.data().completed) return res.status(400).json({ error: 'Already completed' });
-  const reward = Number(t.data().reward) || 0;
+  const reward = Number(task.reward) || 0;
+
+  // Manual review: admin approves it in the panel, points are credited then
+  if (task.verify === 'manual') {
+    if (m.data().submitted) return res.status(400).json({ error: 'Already submitted for review' });
+    await db.collection('task_submissions').add({
+      user: req.uid, username: displayName(req.user), task_id: id, title: task.title || '',
+      reward, status: 'pending', createdAt: FieldValue.serverTimestamp(),
+    });
+    await mine.set({ submitted: true }, { merge: true });
+    return res.json({ ok: true, status: 'pending', reward });
+  }
+
   await mine.set({ completed: true, completedAt: Date.now() }, { merge: true });
   await req.ref.update({ balance: FieldValue.increment(reward) });
   res.json({ ok: true, status: 'completed', reward });
 }));
 
-// ---- Wallet (basic; full TON proof verification comes later) ----
+// ---- Wallet (basic; automatic TON proof verification comes later) ----
 r.get('/wallet/proof-payload', wrap((req, res) =>
   res.json({ payload: crypto.randomBytes(16).toString('hex') })));
 r.post('/wallet/connect', wrap(async (req, res) => {
@@ -261,13 +288,40 @@ r.get('/wallet/status', wrap((req, res) => res.json({
   transactions: [],
 })));
 
-// ---- Not built yet (TON payments / withdrawals) ----
+// ---- TON payments: not built yet ----
 const soon = (req, res) => res.status(501).json({ error: 'Coming soon' });
 r.post('/ton/payment/intent', soon);
 r.post('/ton/payment/verify', soon);
 r.get('/ton/payment/status', soon);
-r.post('/withdrawals/request', soon);
-r.get('/withdrawals/history', wrap((req, res) => res.json({ items: [] })));
+
+// ---- Withdrawals: points are held on request, admin approves/rejects in the panel ----
+r.post('/withdrawals/request', wrap(async (req, res) => {
+  const u = req.user;
+  const cfg = await getConfig();
+  const amount = Math.floor(Number(req.body.amount));
+  if (u.blocked) return res.status(403).json({ error: 'Account blocked' });
+  if (!u.wallet || !u.walletVerified) return res.status(400).json({ error: 'Verify your wallet first' });
+  if (!Number.isFinite(amount) || amount < cfg.minwd) return res.status(400).json({ error: `Minimum withdrawal is ${cfg.minwd} PAWS` });
+  const wref = db.collection('withdrawals').doc();
+  const ok = await db.runTransaction(async (t) => {
+    const s = await t.get(req.ref);
+    if ((s.data().balance || 0) < amount) return false;
+    t.update(req.ref, { balance: FieldValue.increment(-amount) });
+    t.set(wref, {
+      user: req.uid, username: displayName(u), amount, wallet: u.wallet,
+      status: 'pending', tx: '', createdAt: FieldValue.serverTimestamp(),
+    });
+    return true;
+  });
+  if (!ok) return res.status(400).json({ error: 'Insufficient balance' });
+  res.json({ ok: true });
+}));
+r.get('/withdrawals/history', wrap(async (req, res) => {
+  const s = await db.collection('withdrawals').where('user', '==', req.uid).limit(30).get();
+  const items = s.docs.map((d) => ({ id: d.id, amount: d.data().amount, status: d.data().status, ts: d.data().createdAt?.toMillis?.() || 0 }))
+    .sort((a, b) => b.ts - a.ts);
+  res.json({ items });
+}));
 
 // ---- Leaderboard ----
 r.get('/leaderboard', wrap(async (req, res) => {
