@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>PAWS Admin</title>
+<style>
+:root{--card:#151515;--blue:#4DA3F5;--mut:#8a8a8a;--bad:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0 auto;background:#000;color:#fff;font:15px system-ui,sans-serif;padding:12px;max-width:720px}
+.card{background:var(--card);border-radius:12px;padding:12px;margin:10px 0}
+input,select,textarea,button{font:inherit;border-radius:8px;border:1px solid #333;background:#0b0b0b;color:#fff;padding:9px;width:100%;margin:4px 0}
+button{background:var(--blue);color:#000;border:0;font-weight:600;cursor:pointer}
+button.ghost{background:#222;color:#fff}
+button.bad{background:var(--bad)}
+.tabs{display:flex;gap:6px;overflow-x:auto}
+.tabs button{width:auto;white-space:nowrap}
+.row{display:flex;justify-content:space-between;align-items:center}
+.row button{width:auto}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mut{color:var(--mut);font-size:13px}
+.err{color:var(--bad)}
+</style></head>
+<body>
+<div id="login" class="card" hidden>
+  <h2>PAWS Admin</h2>
+  <input id="em" type="email" placeholder="Email" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="go">Login</button>
+  <p id="lerr" class="err"></p>
+</div>
+<div id="app" hidden>
+  <div class="row"><h2>PAWS Admin</h2><button id="out" class="ghost">Logout</button></div>
+  <div id="tabs" class="tabs"></div>
+  <div id="view"></div>
+</div>
+<div id="toast" class="mut"></div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+
+const auth = getAuth(initializeApp({
+  apiKey: 'AIzaSyAKTHY_A2Zm59XPEI6uD5hnMBKWg76tD7M',
+  authDomain: 'telegram-mini-app-meme.firebaseapp.com',
+  projectId: 'telegram-mini-app-meme',
+}));
+const $ = (id) => document.getElementById(id);
+const view = $('view');
+
+// Safe element builder (uses textContent, never innerHTML)
+function h(tag, props = {}, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'class') el.className = v;
+    else el[k] = v;
+  }
+  for (const kid of kids.flat()) el.append(kid instanceof Node ? kid : document.createTextNode(String(kid ?? '')));
+  return el;
+}
+const toast = (m) => { $('toast').textContent = m; setTimeout(() => ($('toast').textContent = ''), 4000); };
+const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message); } };
+
+async function api(path, method = 'GET', body) {
+  const token = await auth.currentUser.getIdToken();
+  const res = await fetch('/api/admin' + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Error ' + res.status);
+  return data;
+}
+
+async function dashboard() {
+  const s = await api('/stats');
+  const box = (n, l) => h('div', { class: 'card' }, h('b', {}, Number(n).toLocaleString()), h('div', { class: 'mut' }, l));
+  view.append(h('div', { class: 'grid' }, box(s.users, 'Users'), box(s.total_points, 'Total points'), box(s.tasks, 'Tasks')));
+}
+
+function userCard(u) {
+  const bal = h('input', { type: 'number', value: u.balance });
+  const lvl = h('input', { type: 'number', value: u.level });
+  const blk = h('select', {}, h('option', { value: 'no' }, 'Active'), h('option', { value: 'yes' }, 'Blocked'));
+  blk.value = u.blocked ? 'yes' : 'no';
+  return h('div', { class: 'card' },
+    h('b', {}, u.name), ' ', h('span', { class: 'mut' }, '#' + u.id + (u.username ? ' @' + u.username : '')),
+    h('div', { class: 'mut' }, 'Wallet: ' + (u.wallet ? (u.walletVerified ? 'verified' : 'unverified') : 'none') + ' | Referrals: ' + u.referralCount),
+    h('div', { class: 'grid' },
+      h('div', {}, h('div', { class: 'mut' }, 'Points'), bal),
+      h('div', {}, h('div', { class: 'mut' }, 'Level (1-50)'), lvl)),
+    blk,
+    h('button', { onclick: guard(async () => {
+      await api('/users/' + u.id, 'POST', { balance: Number(bal.value), level: Number(lvl.value), blocked: blk.value === 'yes' });
+      toast('Saved');
+    }) }, 'Save'));
+}
+
+async function users() {
+  const q = h('input', { placeholder: 'Telegram ID or @username (empty = top 30)' });
+  const list = h('div');
+  const run = async () => {
+    const r = await api('/users?q=' + encodeURIComponent(q.value.trim()));
+    list.replaceChildren(...r.items.map(userCard));
+    if (!r.items.length) list.append(h('p', { class: 'mut' }, 'No users found.'));
+  };
+  view.append(q, h('button', { onclick: guard(run) }, 'Search'), list);
+  await run();
+}
+
+async function tasks() {
+  const f = {
+    id: h('input', { type: 'hidden' }),
+    title: h('input', { placeholder: 'Title' }),
+    description: h('input', { placeholder: 'Description' }),
+    reward: h('input', { type: 'number', placeholder: 'Reward (PAWS)' }),
+    url: h('input', { placeholder: 'Link (https://...)' }),
+    category: h('select', {}, ...['in_game', 'partners', 'invite'].map((c) => h('option', { value: c }, c))),
+  };
+  const list = h('div');
+  const load = async () => {
+    const r = await api('/tasks');
+    list.replaceChildren(...r.items.map((t) => h('div', { class: 'card' },
+      h('b', {}, t.title), ' ', h('span', { class: 'mut' }, (t.category || 'in_game') + ' | +' + t.reward),
+      h('div', { class: 'mut' }, t.url || ''),
+      h('div', { class: 'grid' },
+        h('button', { class: 'ghost', onclick: () => {
+          f.id.value = t.id; f.title.value = t.title || ''; f.description.value = t.description || '';
+          f.reward.value = t.reward || 0; f.url.value = t.url || ''; f.category.value = t.category || 'in_game';
+          window.scrollTo(0, 0);
+        } }, 'Edit'),
+        h('button', { class: 'bad', onclick: guard(async () => {
+          if (!confirm('Delete this task?')) return;
+          await api('/tasks/' + t.id, 'DELETE'); await load();
+        }) }, 'Delete')))));
+  };
+  const save = guard(async () => {
+    await api('/tasks', 'POST', {
+      id: f.id.value || undefined, title: f.title.value, description: f.description.value,
+      reward: Number(f.reward.value), url: f.url.value, category: f.category.value,
+    });
+    Object.values(f).forEach((x) => { if (x.tagName !== 'SELECT') x.value = ''; });
+    toast('Saved'); await load();
+  });
+  view.append(h('div', { class: 'card' }, h('b', {}, 'Add / edit task'), ...Object.values(f), h('button', { onclick: save }, 'Save task')), list);
+  await load();
+}
+
+async function withdrawals() {
+  const r = await api('/withdrawals');
+  if (!r.items.length) return view.append(h('p', { class: 'mut' }, 'No withdrawal requests yet.'));
+  const set = (w, status) => guard(async () => { await api('/withdrawals/' + w.id, 'POST', { status }); show('withdrawals'); });
+  for (const w of r.items) view.append(h('div', { class: 'card' },
+    h('b', {}, w.amount + ' PAWS'), ' ', h('span', { class: 'mut' }, 'user #' + w.user + ' | ' + w.status),
+    h('div', { class: 'mut' }, w.wallet || ''),
+    h('div', { class: 'grid' },
+      h('button', { onclick: set(w, 'completed') }, 'Approve'),
+      h('button', { class: 'bad', onclick: set(w, 'rejected') }, 'Reject'))));
+}
+
+async function broadcast() {
+  const t = h('textarea', { rows: 4, placeholder: 'Message to all users (max 1000 chars)' });
+  view.append(h('div', { class: 'card' }, t,
+    h('p', { class: 'mut' }, 'Only users who started the bot can receive it. Max 500 users per send.'),
+    h('button', { onclick: guard(async () => {
+      if (!confirm('Send this message to all users?')) return;
+      const r = await api('/broadcast', 'POST', { text: t.value });
+      toast('Sent: ' + r.sent + ', failed: ' + r.failed); t.value = '';
+    }) }, 'Send')));
+}
+
+async function auditLog() {
+  const r = await api('/audit');
+  if (!r.items.length) return view.append(h('p', { class: 'mut' }, 'No actions yet.'));
+  for (const a of r.items) view.append(h('div', { class: 'card' },
+    h('b', {}, a.action), ' ', h('span', { class: 'mut' }, a.admin + ' | ' + (a.at ? new Date(a.at).toLocaleString() : '')),
+    h('div', { class: 'mut' }, JSON.stringify(a.details || {}))));
+}
+
+const TABS = { Dashboard: dashboard, Users: users, Tasks: tasks, Withdrawals: withdrawals, Broadcast: broadcast, Audit: auditLog };
+function show(name) {
+  view.replaceChildren();
+  document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('ghost', b.textContent !== name));
+  TABS[name]().catch((e) => toast(e.message));
+}
+$('tabs').append(...Object.keys(TABS).map((n) => h('button', { onclick: () => show(n) }, n)));
+
+$('go').onclick = () => {
+  $('lerr').textContent = '';
+  signInWithEmailAndPassword(auth, $('em').value.trim(), $('pw').value).catch(() => ($('lerr').textContent = 'Login failed'));
+};
+$('out').onclick = () => signOut(auth);
+onAuthStateChanged(auth, (user) => {
+  $('login').hidden = !!user;
+  $('app').hidden = !user;
+  if (user) show('Dashboard');
+});
+</script>
+</body></html>
