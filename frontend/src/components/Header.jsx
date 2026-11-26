@@ -1,4 +1,4 @@
-import { PawPrint, Coins, Map } from 'lucide-react';
+import { OnePrint, Coins, Map } from 'lucide-react';
 export default function Header({ onBuy, onMap }) {
   return (
     <header className="header">
