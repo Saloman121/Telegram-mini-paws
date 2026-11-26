@@ -1,13 +1,17 @@
 import express from 'express';
 import { getAuth } from 'firebase-admin/auth';
 import { AggregateField, FieldValue } from 'firebase-admin/firestore';
+import { loadLevels, resetLevelsCache, checkEligibility } from './rules.js';
 
 export const DEFAULTS = {
   project: '$PAWS', token: 'PAWS', symbol: 'PAWS', jetton: '', adminw: '',
   vfee: 0.15, afee: 0.05, minwd: 10000, rate: '1,000 PAWS = 0.01 TON',
   refpct: 10, tap: 1, dur: 2, comm: '',
+  // Withdrawal eligibility rules
+  wd_walletverified: true, wd_minpts: 0, wd_minlevel: 1, wd_mintasks: 0, wd_minrefs: 0, wd_minage: 0,
 };
-const NUM = ['vfee', 'afee', 'minwd', 'refpct', 'tap', 'dur'];
+const NUM = ['vfee', 'afee', 'minwd', 'refpct', 'tap', 'dur', 'wd_minpts', 'wd_minlevel', 'wd_mintasks', 'wd_minrefs', 'wd_minage'];
+const INT = ['minwd', 'wd_minpts', 'wd_minlevel', 'wd_mintasks', 'wd_minrefs', 'wd_minage'];
 const STR = ['project', 'token', 'symbol', 'jetton', 'adminw', 'rate', 'comm'];
 const CATS = ['in_game', 'partners', 'invite'];
 const emails = () => (process.env.ADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -102,8 +106,9 @@ export default function adminRouter(db) {
       patch.balance = Math.floor(n);
     }
     if (b.level !== undefined) {
+      const maxLevel = (await loadLevels(db, true)).length;
       const n = Number(b.level);
-      if (!Number.isInteger(n) || n < 1 || n > 50) return res.status(400).json({ error: 'Level must be 1-50' });
+      if (!Number.isInteger(n) || n < 1 || n > maxLevel) return res.status(400).json({ error: `Level must be 1-${maxLevel}` });
       patch.level = n;
     }
     if (b.blocked !== undefined) patch.blocked = !!b.blocked;
@@ -186,7 +191,7 @@ export default function adminRouter(db) {
     res.json({ ok: true });
   }));
 
-  // ---- Settings (also used by the Mining and Referrals tabs) ----
+  // ---- Settings (also used by the Mining, Referrals and Eligibility tabs) ----
   r.get('/settings', wrap(async (req, res) => res.json(await loadSettings(db))));
   r.post('/settings', wrap(async (req, res) => {
     const b = req.body || {};
@@ -195,16 +200,56 @@ export default function adminRouter(db) {
       if (b[k] === undefined || b[k] === '') continue;
       const n = Number(b[k]);
       if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: 'Invalid value for ' + k });
-      patch[k] = n;
+      patch[k] = INT.includes(k) ? Math.floor(n) : n;
     }
     if (patch.refpct !== undefined && patch.refpct > 100) return res.status(400).json({ error: 'Referral % max is 100' });
     if (patch.dur !== undefined && (patch.dur < 0.5 || patch.dur > 24)) return res.status(400).json({ error: 'Session hours must be 0.5-24' });
     if (patch.tap !== undefined) patch.tap = Math.max(1, Math.floor(patch.tap));
-    if (patch.minwd !== undefined) patch.minwd = Math.floor(patch.minwd);
+    if (patch.wd_minlevel !== undefined) patch.wd_minlevel = Math.max(1, patch.wd_minlevel);
+    if (b.wd_walletverified !== undefined) patch.wd_walletverified = !!b.wd_walletverified;
     for (const k of STR) if (b[k] !== undefined) patch[k] = String(b[k]).trim().slice(0, 200);
     await db.collection('config').doc('app').set(patch, { merge: true });
     await audit(req, 'Saved configuration', { keys: Object.keys(patch) });
     res.json({ ok: true });
+  }));
+
+  // ---- Level table (taps per session + required holding per level) ----
+  r.get('/levels', wrap(async (req, res) => res.json({ levels: await loadLevels(db, true) })));
+  r.post('/levels', wrap(async (req, res) => {
+    const arr = req.body?.levels;
+    if (!Array.isArray(arr) || arr.length < 1 || arr.length > 200) return res.status(400).json({ error: 'Need 1-200 levels' });
+    const clean = [];
+    for (let i = 0; i < arr.length; i++) {
+      const taps = Math.floor(Number(arr[i]?.max_taps));
+      const hold = Number(arr[i]?.required_holding);
+      if (!Number.isFinite(taps) || taps < 1 || taps > 1000000) return res.status(400).json({ error: `Level ${i + 1}: taps must be 1 to 1,000,000` });
+      if (!Number.isFinite(hold) || hold < 0) return res.status(400).json({ error: `Level ${i + 1}: holding must be 0 or more` });
+      clean.push({ level: i + 1, max_taps: taps, required_holding: Math.floor(hold) });
+    }
+    await db.collection('config').doc('levels').set({ levels: clean });
+    resetLevelsCache();
+    await audit(req, `Saved level table (${clean.length} levels)`, { first: clean[0], last: clean[clean.length - 1] });
+    res.json({ ok: true });
+  }));
+
+  // ---- Withdrawal eligibility: who passes the current rules ----
+  r.get('/eligibility/users', wrap(async (req, res) => {
+    const cfg = await loadSettings(db);
+    const onlyOk = req.query.filter !== 'all';
+    const snap = await db.collection('users').where('balance', '>=', cfg.wd_minpts).orderBy('balance', 'desc').limit(100).get();
+    const rows = [];
+    for (let i = 0; i < snap.docs.length; i += 20) {
+      const part = await Promise.all(snap.docs.slice(i, i + 20).map(async (d) => {
+        const u = d.data();
+        const e = await checkEligibility(db, d.id, u, cfg);
+        return {
+          id: d.id, username: u.username || u.first_name || d.id, balance: u.balance || 0, level: u.level || 1,
+          tasks: e.tasks, refs: e.refs, ok: e.ok, reasons: e.reasons,
+        };
+      }));
+      rows.push(...part);
+    }
+    res.json({ scanned: rows.length, eligible: rows.filter((x) => x.ok).length, items: onlyOk ? rows.filter((x) => x.ok) : rows });
   }));
 
   // ---- Referrals ----
