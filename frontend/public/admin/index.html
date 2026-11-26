@@ -13,7 +13,7 @@ html,body{margin:0;background:var(--bg);color:var(--text);font:14px 'Instrument 
 button,input,select{font:inherit;color:inherit}button{cursor:pointer}
 [hidden]{display:none!important}
 .wrap{display:flex;min-height:100vh}
-aside{width:210px;flex:none;border-right:1px solid var(--line);padding:16px 10px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px}
+aside{width:210px;flex:none;border-right:1px solid var(--line);padding:16px 10px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
 aside .brand{font:800 18px 'Wix Madefor Display',sans-serif;padding:4px 10px 12px}
 aside button{background:none;border:0;text-align:left;padding:10px 12px;border-radius:12px;color:var(--muted);font-weight:600;display:flex;gap:8px;align-items:center}
 aside button.on{background:var(--bluec);color:var(--onbluec)}
@@ -67,7 +67,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/fireba
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
 
 const auth = getAuth(initializeApp({
-  apiKey: 'AIzaSyAKTHY_A2Zm59XPEI6uD5hnMBKWg76tD7M',
+  apiKey: 'PASTE_YOUR_WEB_API_KEY',
   authDomain: 'telegram-mini-app-meme.firebaseapp.com',
   projectId: 'telegram-mini-app-meme',
 }));
@@ -94,11 +94,25 @@ async function api(path, method = 'GET', body) {
   return data;
 }
 
-const N = [['dash', '📊', 'Dashboard'], ['users', '👤', 'Users'], ['tasks', '✅', 'Tasks'], ['mining', '⛏️', 'Mining'], ['ref', '🔗', 'Referrals'], ['wal', '👛', 'Wallets'], ['wd', '💸', 'Withdrawals'], ['set', '⚙️', 'Settings'], ['log', '📜', 'Audit log']];
-const EP = { dash: '/stats', users: '/users', tasks: '/tasks', mining: null, ref: '/referrals', wal: '/wallets', wd: '/withdrawals', set: null, log: '/audit' };
-const S = { tab: 'dash', q: '', d: null, set: {} };
+const N = [['dash', '📊', 'Dashboard'], ['users', '👤', 'Users'], ['tasks', '✅', 'Tasks'], ['mining', '⛏️', 'Mining'], ['ref', '🔗', 'Referrals'], ['wal', '👛', 'Wallets'], ['wd', '💸', 'Withdrawals'], ['elig', '🎯', 'Eligibility'], ['set', '⚙️', 'Settings'], ['log', '📜', 'Audit log']];
+const S = { tab: 'dash', q: '', d: null, set: {}, lv: null, lvEdited: false, fill: { fa: '500', fb: '1000', fn: '' }, elig: 'eligible' };
 
 const pill = (s) => '<span class="pill ' + (['completed', 'verified', 'active'].includes(s) ? 'ok' : ['rejected', 'blocked'].includes(s) ? 'b' : 'w') + '">' + esc(s) + '</span>';
+
+function endpoint(tab) {
+  return {
+    dash: '/stats',
+    users: '/users?q=' + encodeURIComponent(S.q.trim()),
+    tasks: '/tasks',
+    mining: '/levels',
+    ref: '/referrals',
+    wal: '/wallets',
+    wd: '/withdrawals',
+    elig: '/eligibility/users?filter=' + S.elig,
+    set: null,
+    log: '/audit',
+  }[tab];
+}
 
 function dash() {
   const d = S.d;
@@ -110,7 +124,7 @@ function dash() {
 
 function users() {
   return '<h1>Users</h1><div class="row"><input class="inp" id="q" placeholder="Search Telegram ID or username (empty = top 30)" value="' + esc(S.q) + '" style="flex:1"></div><div class="tw"><table><tr><th>Telegram ID</th><th>Username</th><th>PAWS</th><th>Level</th><th>Wallet</th><th>Status</th><th>Actions</th></tr>' +
-    (S.d.items.length ? S.d.items.map((u) => '<tr><td class="mono">' + esc(u.id) + '</td><td>' + esc(u.username || u.name) + '</td><td class="mono">' + f(u.balance) + '</td><td><select class="inp" data-lv="' + esc(u.id) + '">' + Array.from({ length: 50 }, (_, i) => '<option' + (i + 1 === u.level ? ' selected' : '') + '>' + (i + 1) + '</option>').join('') + '</select></td><td class="mono">' + esc(u.wallet ? u.wallet.slice(0, 6) + '…' + u.wallet.slice(-4) : '—') + ' ' + (u.verified ? '<span class="pill ok">verified</span>' : '') + '</td><td>' + pill(u.blocked ? 'blocked' : 'active') + '</td><td><button class="btn sm gh" data-a="pts:' + esc(u.id) + '">Points</button> <button class="btn sm ' + (u.blocked ? 'ok' : 'bad') + '" data-a="blk:' + esc(u.id) + ':' + (u.blocked ? 0 : 1) + '">' + (u.blocked ? 'Unblock' : 'Block') + '</button></td></tr>').join('') : '<tr><td class="m" colspan="7">No users found</td></tr>') + '</table></div>';
+    (S.d.items.length ? S.d.items.map((u) => '<tr><td class="mono">' + esc(u.id) + '</td><td>' + esc(u.username || u.name) + '</td><td class="mono">' + f(u.balance) + '</td><td><input class="inp mono" inputmode="numeric" data-lv="' + esc(u.id) + '" value="' + u.level + '" style="width:70px"></td><td class="mono">' + esc(u.wallet ? u.wallet.slice(0, 6) + '…' + u.wallet.slice(-4) : '—') + ' ' + (u.verified ? '<span class="pill ok">verified</span>' : '') + '</td><td>' + pill(u.blocked ? 'blocked' : 'active') + '</td><td><button class="btn sm gh" data-a="pts:' + esc(u.id) + '">Points</button> <button class="btn sm ' + (u.blocked ? 'ok' : 'bad') + '" data-a="blk:' + esc(u.id) + ':' + (u.blocked ? 0 : 1) + '">' + (u.blocked ? 'Unblock' : 'Block') + '</button></td></tr>').join('') : '<tr><td class="m" colspan="7">No users found</td></tr>') + '</table></div><p class="m">Level: type a number and tap outside the box to save.</p>';
 }
 
 function tasks() {
@@ -123,9 +137,11 @@ function tasks() {
 }
 
 function mining() {
-  let rows = '';
-  for (let l = 1; l <= 50; l++) rows += '<tr><td>' + l + '</td><td class="mono">' + f(l * 500) + '</td><td class="mono">' + (l === 1 ? 'Free' : f(l * 1000)) + '</td></tr>';
-  return '<h1>Mining</h1><div class="card" style="margin-bottom:14px"><div class="form"><label>PAWS per tap<input class="inp" data-s="tap" value="' + esc(S.set.tap) + '"></label><label>Session duration (hours)<input class="inp" data-s="dur" value="' + esc(S.set.dur) + '"></label><label>Auto Tap fee (TON)<input class="inp" data-s="afee" value="' + esc(S.set.afee) + '"></label></div><div style="margin-top:12px"><button class="btn" data-a="save">Save mining config</button></div></div><div class="k" style="margin-bottom:6px">Level table (taps = level × 500, holding = level × 1,000)</div><div class="tw" style="max-height:360px;overflow-y:auto"><table><tr><th>Level</th><th>Max taps / session</th><th>Required holding</th></tr>' + rows + '</table></div>';
+  const L = S.lv;
+  const rows = L.map((x, i) => '<tr><td>' + (i + 1) + '</td><td><input class="inp mono" inputmode="numeric" data-lt="' + i + '" value="' + esc(x.max_taps) + '" style="width:120px"></td><td><input class="inp mono" inputmode="numeric" data-lh="' + i + '" value="' + esc(x.required_holding) + '" style="width:120px"></td></tr>').join('');
+  return '<h1>Mining</h1><div class="card" style="margin-bottom:14px"><b>Mining settings</b><div class="form" style="margin-top:10px"><label>PAWS per tap<input class="inp" data-s="tap" value="' + esc(S.set.tap) + '"></label><label>Session duration (hours)<input class="inp" data-s="dur" value="' + esc(S.set.dur) + '"></label><label>Auto Tap fee (TON)<input class="inp" data-s="afee" value="' + esc(S.set.afee) + '"></label></div><div style="margin-top:12px"><button class="btn" data-a="save">Save mining config</button></div></div>' +
+    '<div class="card" style="margin-bottom:14px"><b>Level table</b> <span class="m">(' + L.length + ' levels)</span><div class="k" style="margin-top:4px">Edit taps and holding per level below, or fill the whole table by formula. Press <b>Save levels</b> when done.</div><div class="form" style="margin-top:10px"><label>Taps per level (A)<input class="inp" inputmode="numeric" id="fa" value="' + esc(S.fill.fa) + '"></label><label>Holding per level (B)<input class="inp" inputmode="numeric" id="fb" value="' + esc(S.fill.fb) + '"></label><label>Number of levels<input class="inp" inputmode="numeric" id="fn" placeholder="' + L.length + '" value="' + esc(S.fill.fn) + '"></label></div><div class="row" style="margin-top:12px"><button class="btn sm gh" data-a="lvfill">Fill by formula</button><button class="btn sm gh" data-a="lvadd">+ Add level</button><button class="btn sm bad" data-a="lvdel">Remove last</button><button class="btn" data-a="lvsave">Save levels</button></div>' + (S.lvEdited ? '<div class="m" style="color:var(--warn)">Unsaved changes</div>' : '') + '</div>' +
+    '<div class="tw" style="max-height:440px;overflow-y:auto"><table><tr><th>Level</th><th>Max taps / session</th><th>Required holding (PAWS)</th></tr>' + rows + '</table></div><p class="m">Formula: taps = level × A, holding = level × B (level 1 is free). Required holding is used when level upgrade is built.</p>';
 }
 
 function ref() {
@@ -136,7 +152,7 @@ function ref() {
 
 function wal() {
   return '<h1>Wallets</h1><div class="tw"><table><tr><th>User</th><th>Wallet</th><th>Verification</th><th>Auto Tap</th><th></th></tr>' +
-    (S.d.items.length ? S.d.items.map((u) => '<tr><td>' + esc(u.username) + '</td><td class="mono">' + esc(u.wallet.slice(0, 8) + '…' + u.wallet.slice(-6)) + '</td><td>' + (u.verified ? pill('verified') : pill('pending')) + '</td><td>' + (u.autotap ? pill('active') : '<span class="pill">no</span>') + '</td><td><button class="btn sm ' + (u.verified ? 'bad' : 'ok') + '" data-a="ver:' + esc(u.id) + ':' + (u.verified ? 0 : 1) + '">' + (u.verified ? 'Remove' : 'Mark verified') + '</button></td></tr>').join('') : '<tr><td class="m" colspan="5">No wallets connected yet</td></tr>') + '</table></div><p class="m">"Mark verified" is a manual admin override (logged). Automatic on-chain payment verification is not built yet.</p>';
+    (S.d.items.length ? S.d.items.map((u) => '<tr><td>' + esc(u.username) + '</td><td class="mono">' + esc(u.wallet.slice(0, 8) + '…' + u.wallet.slice(-6)) + '</td><td>' + (u.verified ? pill('verified') : pill('pending')) + '</td><td>' + (u.autotap ? pill('active') : '<span class="pill">no</span>') + '</td><td><button class="btn sm ' + (u.verified ? 'bad' : 'ok') + '" data-a="ver:' + esc(u.id) + ':' + (u.verified ? 0 : 1) + '">' + (u.verified ? 'Remove' : 'Mark verified') + '</button></td></tr>').join('') : '<tr><td class="m" colspan="5">No wallets connected yet</td></tr>') + '</table></div><p class="m">"Mark verified" is a manual admin override (logged). Normal verification happens when the user pays the fee on-chain.</p>';
 }
 
 function wd() {
@@ -149,6 +165,19 @@ function wd() {
     }).join('') : '<tr><td class="m" colspan="5">No withdrawal requests yet</td></tr>') + '</table></div><p class="m">Send the Jetton transfer yourself first, then paste its hash and mark processed. Rejecting returns the held points to the user.</p>';
 }
 
+function elig() {
+  const d = S.d;
+  const s = S.set;
+  const rule = (k, label) => '<label>' + label + '<input class="inp" inputmode="numeric" data-s="' + k + '" value="' + esc(s[k]) + '"></label>';
+  const rows = d.items.length ? d.items.map((x) => '<tr><td>' + esc(x.username) + ' <span class="m mono">#' + esc(x.id) + '</span></td><td class="mono">' + f(x.balance) + '</td><td class="mono">' + x.level + '</td><td class="mono">' + (x.tasks === null ? '—' : x.tasks) + '</td><td class="mono">' + (x.refs === null ? '—' : x.refs) + '</td><td>' + (x.ok ? '<span class="pill ok">eligible</span>' : '<span class="pill b">not eligible</span>') + '</td><td class="m">' + esc(x.reasons.join('; ')) + '</td></tr>').join('') : '<tr><td class="m" colspan="7">No users found</td></tr>';
+  return '<h1>Eligibility</h1><div class="card" style="margin-bottom:14px"><b>Withdrawal eligibility rules</b><div class="form" style="margin-top:10px"><label>Require verified wallet<select class="inp" data-b="wd_walletverified"><option value="yes"' + (s.wd_walletverified ? ' selected' : '') + '>Yes</option><option value="no"' + (s.wd_walletverified ? '' : ' selected') + '>No</option></select></label>' +
+    rule('minwd', 'Minimum withdrawal amount (PAWS)') + rule('wd_minpts', 'Minimum points balance') + rule('wd_minlevel', 'Minimum level') + rule('wd_mintasks', 'Minimum completed tasks (0 = off)') + rule('wd_minrefs', 'Minimum verified referrals (0 = off)') + rule('wd_minage', 'Minimum account age, days (0 = off)') +
+    '</div><div style="margin-top:12px"><button class="btn" data-a="save">Save rules</button></div></div>' +
+    '<div class="row"><b>Eligible users</b><button class="btn sm ' + (S.elig === 'eligible' ? '' : 'gh') + '" data-a="elf:eligible">Eligible only</button><button class="btn sm ' + (S.elig === 'all' ? '' : 'gh') + '" data-a="elf:all">All scanned</button></div>' +
+    '<p class="m">Scanned ' + f(d.scanned) + ' users (top 100 by points who meet the minimum points) | Eligible: ' + f(d.eligible) + '</p>' +
+    '<div class="tw"><table><tr><th>User</th><th>Points</th><th>Level</th><th>Tasks</th><th>Referrals</th><th>Status</th><th>Why not</th></tr>' + rows + '</table></div><p class="m">These rules are also enforced when a user requests a withdrawal. Rules set to 0 are not checked.</p>';
+}
+
 function set() {
   const F = [['project', 'Project name'], ['token', 'Token name'], ['symbol', 'Token symbol'], ['jetton', 'Jetton master address'], ['adminw', 'Admin TON wallet'], ['vfee', 'Wallet verification fee (TON)'], ['minwd', 'Minimum withdrawal (PAWS)'], ['rate', 'Conversion rate'], ['comm', 'Community link']];
   return '<h1>Settings</h1><div class="card"><div class="form">' + F.map((x) => '<label>' + x[1] + '<input class="inp" data-s="' + x[0] + '" value="' + esc(S.set[x[0]]) + '" placeholder="' + (x[0] === 'jetton' || x[0] === 'adminw' ? 'Not configured' : '') + '"></label>').join('') + '</div><div style="margin-top:12px"><button class="btn" data-a="save">Save settings</button></div></div>';
@@ -159,7 +188,7 @@ function log() {
     (S.d.items.length ? S.d.items.map((l) => '<tr><td class="mono">' + esc(l.at ? new Date(l.at).toLocaleString() : '') + '</td><td class="m">' + esc(l.admin) + '</td><td>' + esc(l.action) + '</td></tr>').join('') : '<tr><td class="m" colspan="3">No actions yet</td></tr>') + '</table></div>';
 }
 
-const V = { dash, users, tasks, mining, ref, wal, wd, set, log };
+const V = { dash, users, tasks, mining, ref, wal, wd, elig, set, log };
 
 function render() {
   const keep = document.activeElement && document.activeElement.id === 'q' ? document.activeElement.selectionStart : null;
@@ -171,30 +200,40 @@ function render() {
 async function load() {
   const tab = S.tab;
   try {
-    const ep = EP[tab];
-    const needsSettings = ['mining', 'ref', 'set'].includes(tab);
+    const ep = endpoint(tab);
+    const needsSettings = ['mining', 'ref', 'set', 'elig'].includes(tab);
     const [d, s] = await Promise.all([
-      ep ? api(ep === '/users' ? '/users?q=' + encodeURIComponent(S.q.trim()) : ep) : Promise.resolve({}),
+      ep ? api(ep) : Promise.resolve({}),
       needsSettings ? api('/settings') : Promise.resolve(null),
     ]);
     if (tab !== S.tab) return;
     S.d = d;
     if (s) S.set = s;
+    if (tab === 'mining' && (!S.lvEdited || !S.lv)) S.lv = d.levels;
   } catch (e) { toast(e.message); S.d = S.d || null; }
   render();
 }
 
 let qTimer;
 document.addEventListener('input', (e) => {
-  if (e.target.id === 'q') { S.q = e.target.value; clearTimeout(qTimer); qTimer = setTimeout(load, 400); }
-  const k = e.target.getAttribute && e.target.getAttribute('data-s');
-  if (k) S.set[k] = e.target.value;
+  const t = e.target;
+  if (t.id === 'q') { S.q = t.value; clearTimeout(qTimer); qTimer = setTimeout(load, 400); }
+  if (['fa', 'fb', 'fn'].includes(t.id)) S.fill[t.id] = t.value;
+  const k = t.getAttribute && t.getAttribute('data-s');
+  if (k) S.set[k] = t.value;
+  const lt = t.getAttribute && t.getAttribute('data-lt');
+  if (lt !== null && lt !== undefined) { S.lv[+lt].max_taps = Number(t.value); S.lvEdited = true; }
+  const lh = t.getAttribute && t.getAttribute('data-lh');
+  if (lh !== null && lh !== undefined) { S.lv[+lh].required_holding = Number(t.value); S.lvEdited = true; }
 });
 
 document.addEventListener('change', async (e) => {
-  const id = e.target.getAttribute && e.target.getAttribute('data-lv');
+  const t = e.target;
+  const b = t.getAttribute && t.getAttribute('data-b');
+  if (b) { S.set[b] = t.value === 'yes'; return; }
+  const id = t.getAttribute && t.getAttribute('data-lv');
   if (!id) return;
-  try { await api('/users/' + id, 'POST', { level: Number(e.target.value) }); toast('Level updated'); } catch (err) { toast(err.message); }
+  try { await api('/users/' + id, 'POST', { level: Number(t.value) }); toast('Level updated'); } catch (err) { toast(err.message); }
 });
 
 document.addEventListener('click', async (e) => {
@@ -202,9 +241,33 @@ document.addEventListener('click', async (e) => {
   if (!el) return;
   const [k, v, w] = el.getAttribute('data-a').split(':');
   try {
-    if (k === 'tab') { S.tab = v; S.d = null; render(); return load(); }
+    if (k === 'tab') { S.tab = v; S.d = null; S.lvEdited = false; render(); return load(); }
+    if (k === 'elf') { S.elig = v; S.d = null; render(); return load(); }
     if (k === 'out') return signOut(auth);
-    if (k === 'blk') await api('/users/' + v, 'POST', { blocked: w === '1' });
+
+    // Level table editing happens locally until "Save levels"
+    if (k === 'lvfill') {
+      const a = Number(S.fill.fa), b = Number(S.fill.fb), n = Number(S.fill.fn || S.lv.length);
+      if (!(a > 0) || !(b >= 0) || !(n >= 1 && n <= 200)) return toast('Enter valid A, B and number of levels (1-200)');
+      S.lv = Array.from({ length: n }, (_, i) => ({ level: i + 1, max_taps: Math.round((i + 1) * a), required_holding: i === 0 ? 0 : Math.round((i + 1) * b) }));
+      S.lvEdited = true; render(); return;
+    }
+    if (k === 'lvadd') {
+      const L = S.lv;
+      if (L.length >= 200) return toast('Max 200 levels');
+      const last = L[L.length - 1] || { max_taps: 0, required_holding: 0 };
+      const prev = L[L.length - 2] || { max_taps: 0, required_holding: 0 };
+      L.push({ level: L.length + 1, max_taps: last.max_taps + (last.max_taps - prev.max_taps || last.max_taps), required_holding: last.required_holding + (last.required_holding - prev.required_holding || last.required_holding) });
+      S.lvEdited = true; render(); return;
+    }
+    if (k === 'lvdel') {
+      if (S.lv.length <= 1) return toast('Keep at least 1 level');
+      if (!confirm('Remove the last level? Users above it will play at the new highest level.')) return;
+      S.lv.pop(); S.lvEdited = true; render(); return;
+    }
+
+    if (k === 'lvsave') { await api('/levels', 'POST', { levels: S.lv }); S.lvEdited = false; }
+    else if (k === 'blk') await api('/users/' + v, 'POST', { blocked: w === '1' });
     else if (k === 'pts') {
       const n = prompt('New points balance for user ' + v + ':');
       if (n === null || n.trim() === '') return;
