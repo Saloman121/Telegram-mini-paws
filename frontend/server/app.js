@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import adminRouter, { loadSettings } from './admin.js';
+import registerTon, { toRaw } from './ton.js';
+import { loadLevels, levelOf, checkEligibility } from './rules.js';
 
 // ---- Firebase init ----
 const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
@@ -16,8 +18,6 @@ app.use(express.json());
 // Admin panel API (Firebase login + ADMIN_EMAILS). Must come before the Telegram-auth router.
 app.use('/api/admin', adminRouter(db));
 
-const MAX_LEVEL = 50;
-
 // Settings come from Firestore (config/app), edited in the admin panel. Cached for 30s.
 let cfgCache = { at: 0, v: null };
 async function getConfig() {
@@ -25,8 +25,15 @@ async function getConfig() {
   cfgCache = { at: Date.now(), v: await loadSettings(db) };
   return cfgCache.v;
 }
-const publicConfig = (c) => ({
-  max_level: MAX_LEVEL,
+const ctx = async () => {
+  const [cfg, levels] = await Promise.all([getConfig(), loadLevels(db)]);
+  return { cfg, levels };
+};
+const publicConfig = (c, levels) => ({
+  project: c.project,
+  symbol: c.symbol,
+  session_hours: c.dur,
+  max_level: levels.length,
   links: { community: c.comm || '', rewards: '' },
   referral_percent: c.refpct,
   verification_fee_ton: c.vfee,
@@ -66,7 +73,7 @@ async function auth(req, res, next) {
         id: String(tg.id), username: tg.username || '', first_name: tg.first_name || '',
         balance: 0, level: 1, sessionTaps: 0, sessionStart: 0,
         referredBy: null, referralCount: 0, referralEarnings: 0,
-        wallet: null, walletVerified: false, autoTap: false, lastSeen: Date.now(),
+        wallet: null, walletVerified: false, autoTap: false, autoStart: 0, lastSeen: Date.now(),
         createdAt: FieldValue.serverTimestamp(),
       });
       snap = await ref.get();
@@ -89,49 +96,70 @@ function session(u, cfg) {
   return { taps: u.sessionTaps || 0, start: u.sessionStart };
 }
 
+// Auto Tap: one full session's taps (from the level table x points per tap) accrue over one session duration
+function autoClaimable(u, cfg, levels) {
+  if (!u.autoTap || !u.autoStart) return 0;
+  const frac = Math.min(1, Math.max(0, (Date.now() - u.autoStart) / sessionMs(cfg)));
+  return Math.floor(frac * levelOf(levels, u.level).max_taps) * cfg.tap;
+}
+
+// Referral bonus: only credited if the referrer has a verified wallet
+async function creditReferral(u, gain, cfg) {
+  if (!u.referredBy || gain <= 0) return;
+  const bonus = Math.floor((gain * cfg.refpct) / 100);
+  if (bonus <= 0) return;
+  const refRef = db.collection('users').doc(u.referredBy);
+  const refSnap = await refRef.get();
+  if (refSnap.exists && refSnap.data().walletVerified) {
+    await refRef.update({
+      balance: FieldValue.increment(bonus),
+      referralEarnings: FieldValue.increment(bonus),
+    });
+  }
+}
+
 const RANKS = ['Rookie', 'Cub', 'Hunter', 'Ranger', 'Alpha', 'Legend'];
 const rankTitle = (lvl) => RANKS[Math.min(RANKS.length - 1, Math.floor((lvl - 1) / 10))];
 const displayName = (d) => d.first_name || d.username || 'User';
 
-// Level table: Level x 500 taps / session, Level x 1,000 PAWS holding (level 1 free)
-const LEVELS = Array.from({ length: MAX_LEVEL }, (_, i) => {
-  const level = i + 1;
-  return { level, max_taps: level * 500, required_holding: level === 1 ? 0 : level * 1000 };
-});
-
-function shapeProfile(u, cfg) {
+function shapeProfile(u, cfg, levels) {
   const s = session(u, cfg);
-  const max = u.level * 500;
+  const lvl = Math.min(u.level || 1, levels.length);
+  const max = levelOf(levels, lvl).max_taps;
   return {
     id: u.id, username: u.username, first_name: u.first_name,
     blocked: !!u.blocked,
     points: u.balance, balance: u.balance, withdrawable: u.balance,
-    level: u.level, rank_title: rankTitle(u.level),
+    level: lvl, rank_title: rankTitle(lvl),
     wallet: u.wallet || null,
     referral_code: u.id,
     mining: {
       energy: Math.max(0, max - s.taps), max_energy: max, per_tap: cfg.tap,
-      auto_tap_active: !!u.autoTap, auto_claimable: 0,
+      auto_tap_active: !!u.autoTap, auto_claimable: autoClaimable(u, cfg, levels), auto_start: u.autoStart || 0,
     },
-    config: publicConfig(cfg),
+    config: publicConfig(cfg, levels),
   };
 }
 
 // ---- Auth / user ----
 r.post('/auth/telegram', wrap(async (req, res) => {
-  const cfg = await getConfig();
+  const { cfg, levels } = await ctx();
   await req.ref.update({ lastSeen: Date.now() });
-  res.json({ ok: true, user: shapeProfile(req.user, cfg) });
+  res.json({ ok: true, user: shapeProfile(req.user, cfg, levels) });
 }));
-r.get('/user/profile', wrap(async (req, res) => res.json(shapeProfile(req.user, await getConfig()))));
+r.get('/user/profile', wrap(async (req, res) => {
+  const { cfg, levels } = await ctx();
+  res.json(shapeProfile(req.user, cfg, levels));
+}));
 r.get('/user/balance', wrap((req, res) => res.json({ balance: req.user.balance })));
 
-r.get('/user/level', wrap((req, res) => {
-  const current = req.user.level;
+r.get('/user/level', wrap(async (req, res) => {
+  const levels = await loadLevels(db);
+  const current = Math.min(req.user.level || 1, levels.length);
   res.json({
     jetton_balance: 0,
     current,
-    levels: LEVELS.map((l) => ({ ...l, unlocked: l.level <= current })),
+    levels: levels.map((l) => ({ ...l, unlocked: l.level <= current })),
   });
 }));
 r.post('/user/level/upgrade', wrap((req, res) =>
@@ -141,8 +169,8 @@ r.post('/user/level/upgrade', wrap((req, res) =>
 r.post('/mining/tap', wrap(async (req, res) => {
   const u = req.user;
   if (u.blocked) return res.status(403).json({ error: 'Account blocked' });
-  const cfg = await getConfig();
-  const max = u.level * 500;
+  const { cfg, levels } = await ctx();
+  const max = levelOf(levels, u.level).max_taps;
   const s = session(u, cfg);
   const want = Math.max(0, Math.min(Number(req.body.count) || 0, 100));
   const allowed = Math.max(0, Math.min(want, max - s.taps));
@@ -151,21 +179,7 @@ r.post('/mining/tap', wrap(async (req, res) => {
     balance: FieldValue.increment(gain),
     sessionTaps: s.taps + allowed, sessionStart: s.start,
   });
-
-  // Referral bonus: only credited if the referrer has a verified wallet
-  if (u.referredBy && gain > 0) {
-    const bonus = Math.floor((gain * cfg.refpct) / 100);
-    if (bonus > 0) {
-      const refRef = db.collection('users').doc(u.referredBy);
-      const refSnap = await refRef.get();
-      if (refSnap.exists && refSnap.data().walletVerified) {
-        await refRef.update({
-          balance: FieldValue.increment(bonus),
-          referralEarnings: FieldValue.increment(bonus),
-        });
-      }
-    }
-  }
+  await creditReferral(u, gain, cfg);
 
   res.json({
     added: gain,
@@ -174,12 +188,33 @@ r.post('/mining/tap', wrap(async (req, res) => {
   });
 }));
 r.get('/mining/status', wrap(async (req, res) => {
-  const cfg = await getConfig();
+  const { cfg, levels } = await ctx();
   const s = session(req.user, cfg);
-  res.json({ sessionTaps: s.taps, maxTaps: req.user.level * 500,
+  res.json({ sessionTaps: s.taps, maxTaps: levelOf(levels, req.user.level).max_taps,
              resetsAt: s.start + sessionMs(cfg), balance: req.user.balance });
 }));
-r.post('/mining/claim', wrap((req, res) => res.json({ claimed: 0, balance: req.user.balance })));
+
+// Auto Tap claim: pays what has accrued and restarts the accrual clock
+r.post('/mining/claim', wrap(async (req, res) => {
+  if (req.user.blocked) return res.status(403).json({ error: 'Account blocked' });
+  const { cfg, levels } = await ctx();
+  const out = await db.runTransaction(async (t) => {
+    const snap = await t.get(req.ref);
+    const u = snap.data();
+    if (!u.autoTap) return { error: 'Auto Tap is not active' };
+    if (!u.autoStart) {
+      t.update(req.ref, { autoStart: Date.now() });
+      return { error: 'Auto Tap started. Come back later to claim.' };
+    }
+    const amount = autoClaimable(u, cfg, levels);
+    if (amount <= 0) return { error: 'Nothing to claim yet' };
+    t.update(req.ref, { balance: FieldValue.increment(amount), autoStart: Date.now() });
+    return { claimed: amount, balance: (u.balance || 0) + amount, user: u };
+  });
+  if (out.error) return res.status(400).json({ error: out.error });
+  await creditReferral(out.user, out.claimed, cfg);
+  res.json({ claimed: out.claimed, balance: out.balance });
+}));
 
 // ---- Referrals ----
 r.get('/referrals', wrap(async (req, res) => {
@@ -269,38 +304,51 @@ r.post('/tasks/complete', wrap(async (req, res) => {
   res.json({ ok: true, status: 'completed', reward });
 }));
 
-// ---- Wallet (basic; automatic TON proof verification comes later) ----
+// ---- Wallet ----
 r.get('/wallet/proof-payload', wrap((req, res) =>
   res.json({ payload: crypto.randomBytes(16).toString('hex') })));
 r.post('/wallet/connect', wrap(async (req, res) => {
   const address = req.body?.account?.address || req.body?.address;
   if (!address) return res.status(400).json({ error: 'Address missing' });
-  await req.ref.update({ wallet: address });
+  const raw = toRaw(address);
+  if (!raw) return res.status(400).json({ error: 'Invalid address' });
+  const patch = { wallet: address, walletNetwork: String(req.body?.network || '') };
+  // A different wallet needs its own verification
+  if (toRaw(req.user.wallet) !== raw) patch.walletVerified = false;
+  await req.ref.update(patch);
   res.json({ ok: true });
 }));
-r.get('/wallet/status', wrap((req, res) => res.json({
-  connected: !!req.user.wallet,
-  address: req.user.wallet || null,
-  verified: !!req.user.walletVerified,
-  ton_balance: 0,
-  jetton_balance: 0,
-  payments: [],
-  transactions: [],
-})));
+r.get('/wallet/status', wrap(async (req, res) => {
+  let payments = [];
+  if (!req.user.walletVerified) {
+    const s = await db.collection('payment_intents').where('user', '==', req.uid).limit(10).get();
+    payments = s.docs
+      .map((d) => ({ id: d.id, status: d.data().status, at: d.data().createdAt || 0 }))
+      .filter((p) => p.at > Date.now() - 3600000);
+  }
+  res.json({
+    connected: !!req.user.wallet,
+    address: req.user.wallet || null,
+    verified: !!req.user.walletVerified,
+    ton_balance: 0,
+    jetton_balance: 0,
+    payments,
+    transactions: [],
+  });
+}));
 
-// ---- TON payments: not built yet ----
-const soon = (req, res) => res.status(501).json({ error: 'Coming soon' });
-r.post('/ton/payment/intent', soon);
-r.post('/ton/payment/verify', soon);
-r.get('/ton/payment/status', soon);
+// ---- TON payments: wallet verification + Auto Tap. Buy Token: Coming soon ----
+registerTon(r, { db, getConfig, wrap });
 
-// ---- Withdrawals: points are held on request, admin approves/rejects in the panel ----
+// ---- Withdrawals: eligibility rules (admin panel) are enforced here; points are held on request ----
 r.post('/withdrawals/request', wrap(async (req, res) => {
   const u = req.user;
   const cfg = await getConfig();
   const amount = Math.floor(Number(req.body.amount));
   if (u.blocked) return res.status(403).json({ error: 'Account blocked' });
-  if (!u.wallet || !u.walletVerified) return res.status(400).json({ error: 'Verify your wallet first' });
+  if (!u.wallet) return res.status(400).json({ error: 'Connect your wallet first' });
+  const e = await checkEligibility(db, req.uid, u, cfg);
+  if (!e.ok) return res.status(400).json({ error: 'Not eligible: ' + e.reasons.join('; ') });
   if (!Number.isFinite(amount) || amount < cfg.minwd) return res.status(400).json({ error: `Minimum withdrawal is ${cfg.minwd} PAWS` });
   const wref = db.collection('withdrawals').doc();
   const ok = await db.runTransaction(async (t) => {
