@@ -7,9 +7,15 @@ export default function Header({ onBuy, onMap }) {
         <b className="brand">OneGram</b>
       </div>
       <div className="row">
-        <button className="btn sm" onClick={onBuy}><Coins size={14} /> Buy Token</button>
+        <button
+          className="btn sm"
+          onClick={onBuy}
+          style={{ padding: '4px 9px', fontSize: 11, gap: 4 }}
+        >
+          <Coins size={11} /> Buy Token
+        </button>
         <button className="btn sm ghost" onClick={onMap}><Map size={14} /> Leaderboard</button>
       </div>
     </header>
   );
-}
+        }
