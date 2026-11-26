@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import WebApp from '@twa-dev/sdk';
-import { PawPrint, UserPlus } from 'lucide-react';
+import { UserPlus } from 'lucide-react';
 import { api } from '../services/api';
 import { useApp } from '../store.jsx';
 import { fmt } from '../services/format';
@@ -25,7 +25,9 @@ export default function Friends() {
   return (
     <div className="stack gap-lg">
       <div className="center"><h1 className="h1">INVITE FRIENDS</h1><p className="muted small">SHARE YOUR INVITATION LINK &amp; GET {profile.config.referral_percent}% OF FRIEND'S POINTS.</p></div>
-      <div className="paws-pair"><PawPrint size={44} className="blue-txt" /><PawPrint size={44} className="blue-txt flip" /></div>
+      <div className="center">
+        <img src="/paws-logo.png" alt="" width={96} height={96} style={{ borderRadius: '50%' }} />
+      </div>
       {stats && (
         <div className="grid3">
           <div className="card center"><b>{fmt(stats.total_invited)}</b><div className="small muted">Invited</div></div>
