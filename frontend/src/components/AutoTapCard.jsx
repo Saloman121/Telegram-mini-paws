@@ -16,7 +16,7 @@ export default function AutoTapCard() {
       </div>
       {m.auto_tap_active
         ? (m.auto_claimable > 0 ? <button className="btn full" onClick={claim}>Claim {fmt(m.auto_claimable)} PAWS</button> : <p className="small muted">Nothing to claim yet.</p>)
-        : <PaymentButton purpose="auto_tap" label={`Activate • ${fmtTon(profile.config.auto_tap_fee_ton)} TON (one-time)`} onConfirmed={refresh} />}
+        : <PaymentButton purpose="auto_tap" label={`Activate • ${fmtTon(profile.config.auto_tap_fee_ton)} GRAM (one-time)`} onConfirmed={refresh} />}
     </article>
   );
 }
