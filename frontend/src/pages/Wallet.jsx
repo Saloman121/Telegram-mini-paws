@@ -40,10 +40,10 @@ export default function Wallet() {
         {wallet ? <div className="between"><span className="mono">{short(st?.address || wallet.account.address)}</span><button className="link" onClick={() => ui.disconnect()}>Disconnect</button></div>
           : <TonConnectButton />}
         <div className="grid2">
-          <div><div className="small muted">TON balance</div><b className="mono">{st ? fmtTon(st.ton_balance) : '—'}</b></div>
+          <div><div className="small muted">GRAM balance</div><b className="mono">{st ? fmtTon(st.ton_balance) : '—'}</b></div>
           <div><div className="small muted">PAWS Jetton</div><b className="mono">{st ? fmt(st.jetton_balance) : '—'}</b></div>
         </div>
-        {wallet && !verified && <PaymentButton purpose="wallet_verification" label={`Verify wallet • ${fmtTon(c.verification_fee_ton)} TON`} onConfirmed={onVerified} />}
+        {wallet && !verified && <PaymentButton purpose="wallet_verification" label={`Verify wallet • ${fmtTon(c.verification_fee_ton)} GRAM`} onConfirmed={onVerified} />}
         {st?.payments?.some((p) => p.status === 'failed') && <p className="err small">A previous payment failed. You can retry.</p>}
       </div>
 
