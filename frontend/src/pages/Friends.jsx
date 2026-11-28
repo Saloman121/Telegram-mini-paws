@@ -9,6 +9,7 @@ export default function Friends() {
   const { profile, toast } = useApp();
   const [stats, setStats] = useState(null);
   const [list, setList] = useState([]);
+  const project = profile.config?.project || '$PAWS';
   useEffect(() => {
     api.referralStats().then(setStats).catch((e) => toast(e.message));
     api.referrals().then((r) => setList(r.items)).catch(() => {});
@@ -18,7 +19,7 @@ export default function Friends() {
   const link = profile.referral_link || (bot ? `https://t.me/${bot}?startapp=${profile.referral_code}` : '');
   const share = () => {
     if (!link) return toast('Referral link not configured');
-    WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join me on $PAWS and start earning!')}`);
+    WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(`Join me on ${project} and start earning!`)}`);
   };
   const copy = async () => { try { await navigator.clipboard.writeText(link); toast('Link copied'); } catch { toast(link); } };
 
