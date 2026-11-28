@@ -5,6 +5,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import adminRouter, { loadSettings } from './admin.js';
 import registerTon, { toRaw } from './ton.js';
 import { loadLevels, levelOf, checkEligibility } from './rules.js';
+import { readHolding, pow10 } from './jetton.js';
 
 // ---- Firebase init ----
 const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
@@ -167,17 +168,57 @@ r.get('/app/config', wrap(async (req, res) => {
   });
 }));
 
+// ---- Levels: the Jetton holding is read from the blockchain ----
 r.get('/user/level', wrap(async (req, res) => {
-  const levels = await loadLevels(db);
-  const current = Math.min(req.user.level || 1, levels.length);
+  const { cfg, levels } = await ctx();
+  const u = req.user;
+  const current = Math.min(u.level || 1, levels.length);
+  let held = 0;
+  if (u.wallet && u.walletVerified) {
+    const h = await readHolding(cfg, u.wallet);
+    if (h.ok) held = h.tokens;
+  }
   res.json({
-    jetton_balance: 0,
+    jetton_balance: held,
     current,
     levels: levels.map((l) => ({ ...l, unlocked: l.level <= current })),
   });
 }));
-r.post('/user/level/upgrade', wrap((req, res) =>
-  res.status(501).json({ error: 'Upgrade needs verified PAWS holding (coming soon)' })));
+
+r.post('/user/level/upgrade', wrap(async (req, res) => {
+  const u = req.user;
+  if (u.blocked) return res.status(403).json({ error: 'Account blocked' });
+  const { cfg, levels } = await ctx();
+  const target = Number(req.body?.level);
+  const current = Math.min(u.level || 1, levels.length);
+  if (!Number.isInteger(target) || target !== current + 1 || target > levels.length)
+    return res.status(400).json({ error: 'You can only upgrade to the next level' });
+  if (!u.wallet || !u.walletVerified)
+    return res.status(400).json({ error: 'Verify your wallet first (Wallet tab)' });
+
+  // One wallet can back only one account
+  const dup = await db.collection('users').where('wallet', '==', u.wallet).where('walletVerified', '==', true).limit(2).get();
+  if (dup.docs.some((d) => d.id !== req.uid))
+    return res.status(400).json({ error: 'This wallet is already used by another account' });
+
+  const need = levelOf(levels, target).required_holding;
+  if (need > 0) {
+    const h = await readHolding(cfg, u.wallet, true); // fresh, never cached
+    if (!h.configured) return res.status(400).json({ error: 'Token is not configured yet' });
+    if (!h.ok) return res.status(503).json({ error: h.error });
+    if (h.units < BigInt(need) * pow10())
+      return res.status(400).json({ error: `Hold at least ${need} ${cfg.symbol} to unlock level ${target} (you hold ${h.tokens})` });
+  }
+
+  const ok = await db.runTransaction(async (t) => {
+    const s = await t.get(req.ref);
+    if (Math.min(s.data().level || 1, levels.length) !== current) return false;
+    t.update(req.ref, { level: target });
+    return true;
+  });
+  if (!ok) return res.status(400).json({ error: 'Level changed, refresh and try again' });
+  res.json({ ok: true, level: target });
+}));
 
 // ---- Mining: manual taps ----
 r.post('/mining/tap', wrap(async (req, res) => {
@@ -369,6 +410,7 @@ r.post('/wallet/connect', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 r.get('/wallet/status', wrap(async (req, res) => {
+  const { cfg } = await ctx();
   let payments = [];
   if (!req.user.walletVerified) {
     const s = await db.collection('payment_intents').where('user', '==', req.uid).limit(10).get();
@@ -376,12 +418,17 @@ r.get('/wallet/status', wrap(async (req, res) => {
       .map((d) => ({ id: d.id, status: d.data().status, at: d.data().createdAt || 0 }))
       .filter((p) => p.at > Date.now() - 3600000);
   }
+  let jetton = 0;
+  if (req.user.wallet) {
+    const h = await readHolding(cfg, req.user.wallet);
+    if (h.ok) jetton = h.tokens;
+  }
   res.json({
     connected: !!req.user.wallet,
     address: req.user.wallet || null,
     verified: !!req.user.walletVerified,
     ton_balance: 0,
-    jetton_balance: 0,
+    jetton_balance: jetton,
     payments,
     transactions: [],
   });
