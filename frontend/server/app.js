@@ -18,7 +18,7 @@ app.use(express.json());
 // Admin panel API (Firebase login + ADMIN_EMAILS). Must come before the Telegram-auth router.
 app.use('/api/admin', adminRouter(db));
 
-// Settings come from Firestore (config/app), edited in the admin panel. Cached for 30s.
+// Settings come from Firestore (config/app), edited in the admin panel. Cached for 10s.
 let cfgCache = { at: 0, v: null };
 async function getConfig() {
   if (cfgCache.v && Date.now() - cfgCache.at < 10000) return cfgCache.v;
@@ -33,6 +33,7 @@ const publicConfig = (c, levels) => ({
   project: c.project,
   symbol: c.symbol,
   session_hours: c.dur,
+  mining_mode: c.mode,
   max_level: levels.length,
   links: { community: c.comm || '', rewards: '' },
   referral_percent: c.refpct,
@@ -72,6 +73,7 @@ async function auth(req, res, next) {
       await ref.set({
         id: String(tg.id), username: tg.username || '', first_name: tg.first_name || '',
         balance: 0, level: 1, sessionTaps: 0, sessionStart: 0,
+        mineStart: 0, mineEnd: 0, mineReward: 0,
         referredBy: null, referralCount: 0, referralEarnings: 0,
         wallet: null, walletVerified: false, autoTap: false, autoStart: 0, lastSeen: Date.now(),
         createdAt: FieldValue.serverTimestamp(),
@@ -136,6 +138,8 @@ function shapeProfile(u, cfg, levels) {
     mining: {
       energy: Math.max(0, max - s.taps), max_energy: max, per_tap: cfg.tap,
       auto_tap_active: !!u.autoTap, auto_claimable: autoClaimable(u, cfg, levels), auto_start: u.autoStart || 0,
+      mine_start: u.mineStart || 0, mine_end: u.mineEnd || 0, mine_reward: u.mineReward || 0,
+      server_time: Date.now(),
     },
     config: publicConfig(cfg, levels),
   };
@@ -152,6 +156,7 @@ r.get('/user/profile', wrap(async (req, res) => {
   res.json(shapeProfile(req.user, cfg, levels));
 }));
 r.get('/user/balance', wrap((req, res) => res.json({ balance: req.user.balance })));
+
 // Lightweight settings sync for the open app (does not touch points/energy)
 r.get('/app/config', wrap(async (req, res) => {
   const { cfg, levels } = await ctx();
@@ -161,6 +166,7 @@ r.get('/app/config', wrap(async (req, res) => {
     level: p.level, rank_title: p.rank_title, blocked: p.blocked,
   });
 }));
+
 r.get('/user/level', wrap(async (req, res) => {
   const levels = await loadLevels(db);
   const current = Math.min(req.user.level || 1, levels.length);
@@ -173,11 +179,12 @@ r.get('/user/level', wrap(async (req, res) => {
 r.post('/user/level/upgrade', wrap((req, res) =>
   res.status(501).json({ error: 'Upgrade needs verified PAWS holding (coming soon)' })));
 
-// ---- Mining ----
+// ---- Mining: manual taps ----
 r.post('/mining/tap', wrap(async (req, res) => {
   const u = req.user;
   if (u.blocked) return res.status(403).json({ error: 'Account blocked' });
   const { cfg, levels } = await ctx();
+  if (cfg.mode === 'session') return res.status(400).json({ error: 'Tap to start a mining session instead' });
   const max = levelOf(levels, u.level).max_taps;
   const s = session(u, cfg);
   const want = Math.max(0, Math.min(Number(req.body.count) || 0, 100));
@@ -202,7 +209,42 @@ r.get('/mining/status', wrap(async (req, res) => {
              resetsAt: s.start + sessionMs(cfg), balance: req.user.balance });
 }));
 
-// Auto Tap claim: pays what has accrued and restarts the accrual clock
+// ---- Mining: 1 tap starts a session, claim the whole reward when it ends ----
+r.post('/mining/start', wrap(async (req, res) => {
+  if (req.user.blocked) return res.status(403).json({ error: 'Account blocked' });
+  const { cfg, levels } = await ctx();
+  if (cfg.mode !== 'session') return res.status(400).json({ error: 'Session mining is off' });
+  const out = await db.runTransaction(async (t) => {
+    const snap = await t.get(req.ref);
+    const u = snap.data();
+    if (u.mineStart) return { error: Date.now() >= (u.mineEnd || 0) ? 'Claim your reward first' : 'Session already running' };
+    const now = Date.now();
+    // Reward is fixed at start, so later admin changes do not affect a running session
+    const reward = levelOf(levels, u.level).max_taps * cfg.tap;
+    t.update(req.ref, { mineStart: now, mineEnd: now + sessionMs(cfg), mineReward: reward });
+    return { ok: true };
+  });
+  if (out.error) return res.status(400).json({ error: out.error });
+  res.json({ ok: true });
+}));
+r.post('/mining/collect', wrap(async (req, res) => {
+  if (req.user.blocked) return res.status(403).json({ error: 'Account blocked' });
+  const { cfg } = await ctx();
+  const out = await db.runTransaction(async (t) => {
+    const snap = await t.get(req.ref);
+    const u = snap.data();
+    if (!u.mineStart) return { error: 'No active session. Tap to start one.' };
+    if (Date.now() < (u.mineEnd || 0)) return { error: 'Session is not finished yet' };
+    const reward = u.mineReward || 0;
+    t.update(req.ref, { balance: FieldValue.increment(reward), mineStart: 0, mineEnd: 0, mineReward: 0 });
+    return { claimed: reward, balance: (u.balance || 0) + reward, user: u };
+  });
+  if (out.error) return res.status(400).json({ error: out.error });
+  await creditReferral(out.user, out.claimed, cfg);
+  res.json({ claimed: out.claimed, points: out.balance });
+}));
+
+// ---- Auto Tap (paid with TON): claim pays what has accrued and restarts the accrual clock ----
 r.post('/mining/claim', wrap(async (req, res) => {
   if (req.user.blocked) return res.status(403).json({ error: 'Account blocked' });
   const { cfg, levels } = await ctx();
