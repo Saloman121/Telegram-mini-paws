@@ -6,7 +6,7 @@ import { loadLevels, resetLevelsCache, checkEligibility } from './rules.js';
 export const DEFAULTS = {
   project: '$PAWS', token: 'PAWS', symbol: 'PAWS', jetton: '', adminw: '',
   vfee: 0.15, afee: 0.05, minwd: 10000, rate: '1,000 PAWS = 0.01 TON',
-  refpct: 10, tap: 1, dur: 2, comm: '',
+    refpct: 10, tap: 1, dur: 2, comm: '', mode: 'session',
   // Withdrawal eligibility rules
   wd_walletverified: true, wd_minpts: 0, wd_minlevel: 1, wd_mintasks: 0, wd_minrefs: 0, wd_minage: 0,
 };
@@ -207,6 +207,7 @@ export default function adminRouter(db) {
     if (patch.tap !== undefined) patch.tap = Math.max(1, Math.floor(patch.tap));
     if (patch.wd_minlevel !== undefined) patch.wd_minlevel = Math.max(1, patch.wd_minlevel);
     if (b.wd_walletverified !== undefined) patch.wd_walletverified = !!b.wd_walletverified;
+    if (b.mode !== undefined) patch.mode = b.mode === 'manual' ? 'manual' : 'session';
     for (const k of STR) if (b[k] !== undefined) patch[k] = String(b[k]).trim().slice(0, 200);
     await db.collection('config').doc('app').set(patch, { merge: true });
     await audit(req, 'Saved configuration', { keys: Object.keys(patch) });
