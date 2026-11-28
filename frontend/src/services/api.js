@@ -26,6 +26,8 @@ export const api = {
   tap: (count) => request('/mining/tap', { method: 'POST', body: { count } }),
   miningStatus: () => request('/mining/status'),
   claim: () => request('/mining/claim', { method: 'POST' }),
+  startMining: () => request('/mining/start', { method: 'POST' }),
+  collectMining: () => request('/mining/collect', { method: 'POST' }),
 
   referrals: (cursor) => request(`/referrals${cursor ? `?cursor=${cursor}` : ''}`),
   referralStats: () => request('/referrals/stats'),
