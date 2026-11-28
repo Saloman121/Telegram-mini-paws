@@ -17,6 +17,19 @@ export function AppProvider({ children }) {
 
   const toast = useCallback((msg) => { setToast(msg); setTimeout(() => setToast(null), 2800); }, []);
 
+  // Pulls admin-controlled settings (name, symbol, fees, session hours, per-tap, level limits, block status)
+  // without touching points/energy, so taps in progress never jump.
+  const syncConfig = useCallback(async () => {
+    try {
+      const c = await api.appConfig();
+      setProfile((p) => p && ({
+        ...p,
+        level: c.level, rank_title: c.rank_title, blocked: c.blocked, config: c.config,
+        mining: { ...p.mining, per_tap: c.per_tap, max_energy: c.max_energy },
+      }));
+    } catch { /* ignore, the next poll retries */ }
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
@@ -27,6 +40,20 @@ export function AppProvider({ children }) {
       } catch (e) { setError(e.message); }
     })();
   }, [refresh]);
+
+  // Live settings: every 60s while the app is visible, and when the user comes back to it
+  useEffect(() => {
+    let last = Date.now();
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (Date.now() - last < 15000) return;
+      last = Date.now();
+      syncConfig();
+    };
+    const t = setInterval(tick, 60000);
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick); };
+  }, [syncConfig]);
 
   return <Ctx.Provider value={{ profile, error, refresh, toast, toastMsg }}>{children}</Ctx.Provider>;
 }
