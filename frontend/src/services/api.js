@@ -18,6 +18,7 @@ async function request(path, { method = 'GET', body } = {}) {
 export const api = {
   auth: () => request('/auth/telegram', { method: 'POST', body: { initData: WebApp.initData } }),
   profile: () => request('/user/profile'),
+  appConfig: () => request('/app/config'),
   balance: () => request('/user/balance'),
   level: () => request('/user/level'),
   upgradeLevel: (level) => request('/user/level/upgrade', { method: 'POST', body: { level } }),
