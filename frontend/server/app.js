@@ -21,7 +21,7 @@ app.use('/api/admin', adminRouter(db));
 // Settings come from Firestore (config/app), edited in the admin panel. Cached for 30s.
 let cfgCache = { at: 0, v: null };
 async function getConfig() {
-  if (cfgCache.v && Date.now() - cfgCache.at < 30000) return cfgCache.v;
+  if (cfgCache.v && Date.now() - cfgCache.at < 10000) return cfgCache.v;
   cfgCache = { at: Date.now(), v: await loadSettings(db) };
   return cfgCache.v;
 }
@@ -152,7 +152,15 @@ r.get('/user/profile', wrap(async (req, res) => {
   res.json(shapeProfile(req.user, cfg, levels));
 }));
 r.get('/user/balance', wrap((req, res) => res.json({ balance: req.user.balance })));
-
+// Lightweight settings sync for the open app (does not touch points/energy)
+r.get('/app/config', wrap(async (req, res) => {
+  const { cfg, levels } = await ctx();
+  const p = shapeProfile(req.user, cfg, levels);
+  res.json({
+    config: p.config, per_tap: p.mining.per_tap, max_energy: p.mining.max_energy,
+    level: p.level, rank_title: p.rank_title, blocked: p.blocked,
+  });
+}));
 r.get('/user/level', wrap(async (req, res) => {
   const levels = await loadLevels(db);
   const current = Math.min(req.user.level || 1, levels.length);
