@@ -8,10 +8,10 @@ export const DEFAULTS = {
   vfee: 0.15, afee: 0.05, minwd: 10000, rate: '1,000 PAWS = 0.01 TON',
     refpct: 10, tap: 1, dur: 2, comm: '', mode: 'session',
   // Withdrawal eligibility rules
-  wd_walletverified: true, wd_minpts: 0, wd_minlevel: 1, wd_mintasks: 0, wd_minrefs: 0, wd_minage: 0,
+  wd_walletverified: true, wd_minpts: 0, wd_minlevel: 1, wd_mintasks: 0, wd_minrefs: 0, wd_minage: 0, hold_days: 7,
 };
-const NUM = ['vfee', 'afee', 'minwd', 'refpct', 'tap', 'dur', 'wd_minpts', 'wd_minlevel', 'wd_mintasks', 'wd_minrefs', 'wd_minage'];
-const INT = ['minwd', 'wd_minpts', 'wd_minlevel', 'wd_mintasks', 'wd_minrefs', 'wd_minage'];
+const NUM = ['vfee', 'afee', 'minwd', 'refpct', 'tap', 'dur', 'wd_minpts', 'wd_minlevel', 'wd_mintasks', 'wd_minrefs', 'wd_minage', 'hold_days'];
+const INT = ['minwd', 'wd_minpts', 'wd_minlevel', 'wd_mintasks', 'wd_minrefs', 'wd_minage', 'hold_days'];
 const STR = ['project', 'token', 'symbol', 'jetton', 'adminw', 'rate', 'comm'];
 const CATS = ['in_game', 'partners', 'invite'];
 const emails = () => (process.env.ADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
@@ -109,7 +109,8 @@ export default function adminRouter(db) {
       const maxLevel = (await loadLevels(db, true)).length;
       const n = Number(b.level);
       if (!Number.isInteger(n) || n < 1 || n > maxLevel) return res.status(400).json({ error: `Level must be 1-${maxLevel}` });
-      patch.level = n;
+            patch.level = n;
+      patch.levelFixed = true;
     }
     if (b.blocked !== undefined) patch.blocked = !!b.blocked;
     const u = snap.data();
